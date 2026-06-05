@@ -194,22 +194,30 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
       const { data: u } = await supabase.auth.getUser();
+      const userId = u.user?.id;
+      if (!userId) throw new Error("Não autenticado");
+
+      // Claim da conversa se ainda não estiver atribuída — necessário para o WITH CHECK do UPDATE
+      const assignedId = conversation.assigned_agent_id ?? userId;
+
       const { error } = await supabase.from("messages").insert({
         conversation_id: conversation.id,
-        sender_agent_id: u.user?.id,
+        sender_agent_id: userId,
         direction: "outbound",
         type: "text",
         content,
         status: "sent",
       });
       if (error) throw error;
-      await supabase
+      const { error: convError } = await supabase
         .from("conversations")
         .update({
+          assigned_agent_id: assignedId,
           last_message_at: new Date().toISOString(),
           last_message_preview: content,
         })
         .eq("id", conversation.id);
+      if (convError) throw convError;
     },
     onSuccess: () => {
       setText("");

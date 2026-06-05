@@ -14,16 +14,275 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      channels: {
+        Row: {
+          created_at: string
+          credentials: Json | null
+          id: string
+          identifier: string | null
+          last_connected_at: string | null
+          name: string
+          qr_code: string | null
+          status: Database["public"]["Enums"]["channel_status"]
+          type: Database["public"]["Enums"]["channel_type"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          credentials?: Json | null
+          id?: string
+          identifier?: string | null
+          last_connected_at?: string | null
+          name: string
+          qr_code?: string | null
+          status?: Database["public"]["Enums"]["channel_status"]
+          type: Database["public"]["Enums"]["channel_type"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          credentials?: Json | null
+          id?: string
+          identifier?: string | null
+          last_connected_at?: string | null
+          name?: string
+          qr_code?: string | null
+          status?: Database["public"]["Enums"]["channel_status"]
+          type?: Database["public"]["Enums"]["channel_type"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      contacts: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string | null
+          external_id: string | null
+          id: string
+          metadata: Json | null
+          name: string
+          phone: string | null
+          source_channel_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          external_id?: string | null
+          id?: string
+          metadata?: Json | null
+          name: string
+          phone?: string | null
+          source_channel_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          external_id?: string | null
+          id?: string
+          metadata?: Json | null
+          name?: string
+          phone?: string | null
+          source_channel_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_source_channel_id_fkey"
+            columns: ["source_channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          assigned_agent_id: string | null
+          channel_id: string
+          contact_id: string
+          created_at: string
+          id: string
+          last_message_at: string | null
+          last_message_preview: string | null
+          status: Database["public"]["Enums"]["conversation_status"]
+          tags: string[] | null
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          assigned_agent_id?: string | null
+          channel_id: string
+          contact_id: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          status?: Database["public"]["Enums"]["conversation_status"]
+          tags?: string[] | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          assigned_agent_id?: string | null
+          channel_id?: string
+          contact_id?: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          status?: Database["public"]["Enums"]["conversation_status"]
+          tags?: string[] | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string | null
+          conversation_id: string
+          created_at: string
+          direction: Database["public"]["Enums"]["message_direction"]
+          external_id: string | null
+          id: string
+          media_url: string | null
+          metadata: Json | null
+          sender_agent_id: string | null
+          status: Database["public"]["Enums"]["message_status"]
+          type: Database["public"]["Enums"]["message_type"]
+        }
+        Insert: {
+          content?: string | null
+          conversation_id: string
+          created_at?: string
+          direction: Database["public"]["Enums"]["message_direction"]
+          external_id?: string | null
+          id?: string
+          media_url?: string | null
+          metadata?: Json | null
+          sender_agent_id?: string | null
+          status?: Database["public"]["Enums"]["message_status"]
+          type?: Database["public"]["Enums"]["message_type"]
+        }
+        Update: {
+          content?: string | null
+          conversation_id?: string
+          created_at?: string
+          direction?: Database["public"]["Enums"]["message_direction"]
+          external_id?: string | null
+          id?: string
+          media_url?: string | null
+          metadata?: Json | null
+          sender_agent_id?: string | null
+          status?: Database["public"]["Enums"]["message_status"]
+          type?: Database["public"]["Enums"]["message_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          id: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "agent"
+      channel_status: "connected" | "disconnected" | "connecting" | "error"
+      channel_type: "whatsapp" | "instagram" | "facebook"
+      conversation_status: "open" | "pending" | "resolved" | "closed"
+      message_direction: "inbound" | "outbound"
+      message_status: "pending" | "sent" | "delivered" | "read" | "failed"
+      message_type:
+        | "text"
+        | "image"
+        | "video"
+        | "audio"
+        | "document"
+        | "sticker"
+        | "location"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +409,22 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "agent"],
+      channel_status: ["connected", "disconnected", "connecting", "error"],
+      channel_type: ["whatsapp", "instagram", "facebook"],
+      conversation_status: ["open", "pending", "resolved", "closed"],
+      message_direction: ["inbound", "outbound"],
+      message_status: ["pending", "sent", "delivered", "read", "failed"],
+      message_type: [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "document",
+        "sticker",
+        "location",
+      ],
+    },
   },
 } as const

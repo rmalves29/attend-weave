@@ -264,6 +264,84 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     return { ok: true, id: externalId };
   });
 
+// ---------- send media ----------
+// Recebe um path do bucket "attachments" (privado), gera signed URL e envia
+// via uazapi /send/media. Persiste a mensagem outbound com metadata do arquivo.
+export const sendUazapiMedia = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    storagePath: z.string().min(1),
+    filename: z.string().min(1),
+    mimeType: z.string().min(1),
+    caption: z.string().optional(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from("conversations")
+      .select("id, assigned_agent_id, contacts(phone), channels(credentials)")
+      .eq("id", data.conversationId).single();
+    if (convErr || !conv) throw new Error("Conversa não encontrada");
+
+    const phone = (conv as any).contacts?.phone as string | null;
+    if (!phone) throw new Error("Contato sem telefone");
+    const token = ((conv as any).channels?.credentials as any)?.token;
+    if (!token) throw new Error("Canal sem token uazapi");
+
+    // Signed URL válida por 1h — tempo suficiente pra uazapi baixar o arquivo
+    const { data: signed, error: signErr } = await supabaseAdmin
+      .storage.from("attachments")
+      .createSignedUrl(data.storagePath, 60 * 60);
+    if (signErr || !signed?.signedUrl) throw new Error("Falha ao gerar URL do arquivo");
+
+    const mime = data.mimeType;
+    const kind =
+      mime.startsWith("image/") ? "image" :
+      mime.startsWith("video/") ? "video" :
+      mime.startsWith("audio/") ? "audio" :
+      "document";
+
+    const res = await uazapiFetch("/send/media", {
+      token,
+      body: {
+        number: phone,
+        type: kind,
+        file: signed.signedUrl,
+        docName: kind === "document" ? data.filename : undefined,
+        text: data.caption ?? "",
+      },
+    });
+    const externalId: string | null =
+      res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
+
+    const contentPreview = data.caption?.trim() || `[${kind}] ${data.filename}`;
+
+    const { error: insErr } = await supabaseAdmin.from("messages").insert({
+      conversation_id: conv.id,
+      sender_agent_id: context.userId,
+      direction: "outbound",
+      type: kind,
+      content: contentPreview,
+      status: "sent",
+      external_id: externalId,
+      metadata: {
+        uazapi: res,
+        media: { storagePath: data.storagePath, filename: data.filename, mimeType: mime },
+      },
+    });
+    if (insErr && (insErr as any).code !== "23505") throw insErr;
+
+    await supabaseAdmin.from("conversations").update({
+      assigned_agent_id: conv.assigned_agent_id ?? context.userId,
+      last_message_at: new Date().toISOString(),
+      last_message_preview: contentPreview.slice(0, 120),
+    }).eq("id", conv.id);
+
+    return { ok: true, id: externalId };
+  });
+
 // ---------- sync history ----------
 // Puxa mensagens recentes de um canal (ou de todos) via uazapi e ingere.
 export const syncUazapiHistory = createServerFn({ method: "POST" })

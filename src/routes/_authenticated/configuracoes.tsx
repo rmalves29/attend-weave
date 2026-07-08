@@ -1,14 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
+import { createUser } from "@/lib/users.functions";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Zap, Trash2, Plus } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Zap, Trash2, Plus, Users, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
@@ -24,14 +30,6 @@ function ConfigPage() {
     queryFn: async () => {
       const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       return data;
-    },
-  });
-
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents"],
-    queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("*, user_roles(role)");
-      return data ?? [];
     },
   });
 
@@ -54,8 +52,116 @@ function ConfigPage() {
         </div>
       </Card>
 
+      <Tabs defaultValue="users">
+        <TabsList>
+          <TabsTrigger value="users" className="gap-2">
+            <Users className="w-4 h-4" /> Usuários
+          </TabsTrigger>
+          <TabsTrigger value="quick-replies" className="gap-2">
+            <Zap className="w-4 h-4" /> Respostas rápidas
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="users" className="mt-4">
+          <UsersSection currentUserId={user.id} />
+        </TabsContent>
+
+        <TabsContent value="quick-replies" className="mt-4">
+          <QuickRepliesCard />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function UsersSection({ currentUserId }: { currentUserId: string }) {
+  const qc = useQueryClient();
+  const createUserFn = useServerFn(createUser);
+
+  const { data: currentRoles = [] } = useQuery({
+    queryKey: ["my-roles", currentUserId],
+    queryFn: async () => {
+      const { data } = await supabase.from("user_roles").select("role").eq("user_id", currentUserId);
+      return (data ?? []).map((r: any) => r.role as string);
+    },
+  });
+  const isAdmin = currentRoles.includes("admin");
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("*, user_roles(role)");
+      return data ?? [];
+    },
+  });
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"admin" | "agent">("agent");
+
+  const createMut = useMutation({
+    mutationFn: async () => {
+      await createUserFn({ data: { name: name.trim(), email: email.trim(), password, role } });
+    },
+    onSuccess: () => {
+      setName(""); setEmail(""); setPassword(""); setRole("agent");
+      toast.success("Usuário criado");
+      qc.invalidateQueries({ queryKey: ["agents"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao criar usuário"),
+  });
+
+  const canSubmit = isAdmin && name.trim().length >= 2 && /.+@.+\..+/.test(email) && password.length >= 8;
+
+  return (
+    <>
+      <Card className="p-5 mb-6">
+        <h2 className="font-semibold mb-1 flex items-center gap-2">
+          <UserPlus className="w-4 h-4 text-primary" /> Cadastrar novo usuário
+        </h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          {isAdmin
+            ? "Cria a conta já confirmada. O usuário poderá entrar imediatamente com o e-mail e senha definidos."
+            : "Apenas administradores podem cadastrar novos usuários."}
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input
+            value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Nome" disabled={!isAdmin} maxLength={80}
+          />
+          <Input
+            value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="email@exemplo.com" type="email" disabled={!isAdmin} maxLength={255}
+          />
+          <Input
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="Senha (mín. 8 caracteres)" type="password" disabled={!isAdmin}
+          />
+          <Select value={role} onValueChange={(v) => setRole(v as "admin" | "agent")} disabled={!isAdmin}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="agent">Atendente</SelectItem>
+              <SelectItem value="admin">Administrador</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <Button
+            type="button"
+            onClick={() => createMut.mutate()}
+            disabled={!canSubmit || createMut.isPending}
+          >
+            <Plus className="w-4 h-4 mr-1" />
+            {createMut.isPending ? "Criando…" : "Cadastrar"}
+          </Button>
+        </div>
+      </Card>
+
       <Card className="p-5">
-        <h2 className="font-semibold mb-4">Atendentes ({agents.length})</h2>
+        <h2 className="font-semibold mb-4">Usuários cadastrados ({agents.length})</h2>
         <div className="space-y-2">
           {agents.map((a: any) => (
             <div key={a.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent">
@@ -75,9 +181,7 @@ function ConfigPage() {
           ))}
         </div>
       </Card>
-
-      <QuickRepliesCard />
-    </div>
+    </>
   );
 }
 
@@ -124,7 +228,7 @@ function QuickRepliesCard() {
   });
 
   return (
-    <Card className="p-5 mt-6">
+    <Card className="p-5">
       <h2 className="font-semibold mb-1 flex items-center gap-2">
         <Zap className="w-4 h-4 text-primary" /> Respostas rápidas
       </h2>

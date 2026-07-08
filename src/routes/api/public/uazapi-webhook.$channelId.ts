@@ -53,6 +53,7 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
         }
 
         // Mensagens
+        const { ingestMessage } = await import("@/lib/uazapi-ingest.server");
         const messages = extractMessages(payload);
 
         for (const m of messages) {
@@ -64,12 +65,6 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
     },
   },
 });
-
-function extractPhone(jid?: string): string | null {
-  if (!jid) return null;
-  const p = jid.split("@")[0]?.split(":")[0];
-  return p && /^\d+$/.test(p) ? p : null;
-}
 
 function stringifyEventPart(value: any): string {
   if (!value) return "";
@@ -117,7 +112,9 @@ function looksLikeMessage(value: any): boolean {
     value.message ||
     value.text ||
     value.body ||
-    value.content,
+    value.content ||
+    value.messageType ||
+    value.mediaUrl,
   );
 }
 
@@ -135,96 +132,4 @@ function extractMessages(payload: any): any[] {
   const messages = candidates.filter(looksLikeMessage);
   if (!messages.length && looksLikeMessage(payload)) return [payload];
   return messages;
-}
-
-function extractText(m: any): string {
-  return (
-    m?.text ??
-    m?.message?.text ??
-    m?.message?.conversation ??
-    m?.message?.extendedTextMessage?.text ??
-    m?.message?.textMessage?.text ??
-    m?.msgContent?.conversation ??
-    m?.msgContent?.extendedTextMessage?.text ??
-    m?.textMessage?.text ??
-    m?.body ??
-    m?.content ??
-    ""
-  );
-}
-
-async function ingestMessage(sb: any, channelId: string, m: any) {
-  const key = m?.key ?? m;
-  const remoteJid: string | undefined = key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ?? m?.from ?? m?.sender ?? m?.jid;
-  const fromMe: boolean = Boolean(key?.fromMe ?? m?.fromMe);
-  const externalId: string | undefined = key?.id ?? m?.id ?? m?.messageid ?? m?.messageId ?? m?.message_id;
-  const pushName: string | undefined = m?.pushName ?? m?.senderName ?? m?.name;
-
-  const phone = extractPhone(remoteJid);
-  if (!phone) return;
-  if (remoteJid?.includes("@g.us")) return; // ignora grupos por enquanto
-
-  // Deduplicação: se já ingerimos essa mensagem, pula
-  if (externalId) {
-    const { data: dup } = await sb
-      .from("messages").select("id").eq("external_id", externalId).maybeSingle();
-    if (dup) return;
-  }
-
-  const content = extractText(m);
-  if (!content && !m?.mediaUrl) return;
-
-  // upsert contato (por telefone)
-  let contactId: string;
-  const { data: existing } = await sb
-    .from("contacts").select("id").eq("phone", phone).maybeSingle();
-  if (existing) {
-    contactId = existing.id;
-  } else {
-    const { data: created, error } = await sb.from("contacts")
-      .insert({
-        name: pushName || phone,
-        phone,
-        source_channel_id: channelId,
-        external_id: remoteJid,
-      }).select("id").single();
-    if (error) throw error;
-    contactId = created.id;
-  }
-
-  // upsert conversa aberta (contato + canal)
-  let conversationId: string;
-  const { data: openConv } = await sb.from("conversations")
-    .select("id, unread_count")
-    .eq("contact_id", contactId).eq("channel_id", channelId)
-    .neq("status", "resolved")
-    .order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (openConv) {
-    conversationId = openConv.id;
-  } else {
-    const { data: newConv, error } = await sb.from("conversations")
-      .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
-      .select("id").single();
-    if (error) throw error;
-    conversationId = newConv.id;
-  }
-
-  const { error: insertErr } = await sb.from("messages").insert({
-    conversation_id: conversationId,
-    direction: fromMe ? "outbound" : "inbound",
-    type: "text",
-    content: content || "[mídia]",
-    external_id: externalId,
-    status: "delivered",
-    metadata: { raw: m },
-  });
-  // 23505 = unique_violation → mensagem já ingerida em corrida concorrente
-  if (insertErr && (insertErr as any).code !== "23505") throw insertErr;
-  if (insertErr) return;
-
-  await sb.from("conversations").update({
-    last_message_at: new Date().toISOString(),
-    last_message_preview: (content || "[mídia]").slice(0, 120),
-    unread_count: fromMe ? 0 : ((openConv?.unread_count ?? 0) + 1),
-  }).eq("id", conversationId);
 }

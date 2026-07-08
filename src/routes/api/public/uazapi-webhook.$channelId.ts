@@ -28,8 +28,7 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           return new Response("unauthorized", { status: 401 });
         }
 
-        const event: string = payload?.event ?? payload?.type ?? "";
-        const eventLower = event.toLowerCase();
+        const eventLower = extractEventName(payload).toLowerCase();
 
         // Eventos de conexão
         if (eventLower.includes("connection") || eventLower.includes("status")) {
@@ -54,10 +53,7 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
         }
 
         // Mensagens
-        const messages: any[] = Array.isArray(payload?.data) ? payload.data
-          : payload?.data ? [payload.data]
-          : payload?.messages ?? [];
-        if (!messages.length && payload?.message) messages.push(payload);
+        const messages = extractMessages(payload);
 
         for (const m of messages) {
           try { await ingestMessage(supabaseAdmin, channelId, m); }
@@ -75,11 +71,82 @@ function extractPhone(jid?: string): string | null {
   return p && /^\d+$/.test(p) ? p : null;
 }
 
+function stringifyEventPart(value: any): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    return (
+      stringifyEventPart(value.type) ||
+      stringifyEventPart(value.event) ||
+      stringifyEventPart(value.name) ||
+      stringifyEventPart(value.action) ||
+      stringifyEventPart(value.status)
+    );
+  }
+  return "";
+}
+
+function extractEventName(payload: any): string {
+  return (
+    stringifyEventPart(payload?.event) ||
+    stringifyEventPart(payload?.type) ||
+    stringifyEventPart(payload?.EventType) ||
+    stringifyEventPart(payload?.eventType) ||
+    stringifyEventPart(payload?.data?.event) ||
+    stringifyEventPart(payload?.data?.type)
+  );
+}
+
+function toMessageArray(value: any): any[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function looksLikeMessage(value: any): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Boolean(
+    value.key ||
+    value.remoteJid ||
+    value.chatid ||
+    value.chatId ||
+    value.from ||
+    value.sender ||
+    value.messageid ||
+    value.messageId ||
+    value.message ||
+    value.text ||
+    value.body ||
+    value.content,
+  );
+}
+
+function extractMessages(payload: any): any[] {
+  const candidates = [
+    ...toMessageArray(payload?.data?.messages),
+    ...toMessageArray(payload?.data?.message),
+    ...toMessageArray(payload?.data),
+    ...toMessageArray(payload?.messages),
+    ...toMessageArray(payload?.message),
+    ...toMessageArray(payload?.event?.messages),
+    ...toMessageArray(payload?.event?.message),
+    ...toMessageArray(payload?.event?.data),
+  ];
+  const messages = candidates.filter(looksLikeMessage);
+  if (!messages.length && looksLikeMessage(payload)) return [payload];
+  return messages;
+}
+
 function extractText(m: any): string {
   return (
     m?.text ??
+    m?.message?.text ??
     m?.message?.conversation ??
     m?.message?.extendedTextMessage?.text ??
+    m?.message?.textMessage?.text ??
+    m?.msgContent?.conversation ??
+    m?.msgContent?.extendedTextMessage?.text ??
+    m?.textMessage?.text ??
     m?.body ??
     m?.content ??
     ""
@@ -88,9 +155,9 @@ function extractText(m: any): string {
 
 async function ingestMessage(sb: any, channelId: string, m: any) {
   const key = m?.key ?? m;
-  const remoteJid: string | undefined = key?.remoteJid ?? m?.chatid ?? m?.from ?? m?.sender;
+  const remoteJid: string | undefined = key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ?? m?.from ?? m?.sender ?? m?.jid;
   const fromMe: boolean = Boolean(key?.fromMe ?? m?.fromMe);
-  const externalId: string | undefined = key?.id ?? m?.id ?? m?.messageid;
+  const externalId: string | undefined = key?.id ?? m?.id ?? m?.messageid ?? m?.messageId ?? m?.message_id;
   const pushName: string | undefined = m?.pushName ?? m?.senderName ?? m?.name;
 
   const phone = extractPhone(remoteJid);

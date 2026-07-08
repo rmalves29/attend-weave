@@ -405,6 +405,61 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   );
 }
 
+function MediaBubble({ message }: { message: Message }) {
+  const fn = useServerFn(getMessageMedia);
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ["message-media", message.id],
+    queryFn: () => fn({ data: { messageId: message.id } }),
+    staleTime: 55 * 60 * 1000,
+    retry: 1,
+  });
+
+  const caption = message.content && !message.content.startsWith("[") && !/^(📷|🎥|🎵|📄)/.test(message.content)
+    ? message.content : null;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground py-4 px-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Carregando mídia...
+      </div>
+    );
+  }
+  if (error || !data?.url) {
+    return (
+      <div className="space-y-1">
+        <div className="text-muted-foreground text-xs">{message.content ?? "Mídia indisponível"}</div>
+        <button type="button" onClick={() => refetch()} disabled={isFetching}
+          className="text-xs underline text-primary">
+          {isFetching ? "Tentando..." : "Tentar novamente"}
+        </button>
+      </div>
+    );
+  }
+
+  const mime = data.mimeType ?? "";
+  const type = message.type;
+
+  return (
+    <div className="space-y-1">
+      {type === "image" || mime.startsWith("image/") ? (
+        <a href={data.url} target="_blank" rel="noreferrer">
+          <img src={data.url} alt={data.filename ?? "imagem"} className="rounded max-w-full max-h-80 object-contain" />
+        </a>
+      ) : type === "video" || mime.startsWith("video/") ? (
+        <video src={data.url} controls className="rounded max-w-full max-h-80" />
+      ) : type === "audio" || mime.startsWith("audio/") ? (
+        <audio src={data.url} controls className="w-full" />
+      ) : (
+        <a href={data.url} target="_blank" rel="noreferrer"
+          className="flex items-center gap-2 underline text-primary">
+          <Paperclip className="w-4 h-4" /> {data.filename ?? "Baixar arquivo"}
+        </a>
+      )}
+      {caption && <div className="whitespace-pre-wrap break-words">{caption}</div>}
+    </div>
+  );
+}
+
 function ContactPanel({ conversation }: { conversation: Conversation }) {
   const c = conversation.contacts;
   return (

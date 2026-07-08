@@ -239,39 +239,16 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
 
+  const sendFn = useServerFn(sendUazapiMessage);
   const sendMutation = useMutation({
-    mutationFn: async (content: string) => {
-      const { data: u } = await supabase.auth.getUser();
-      const userId = u.user?.id;
-      if (!userId) throw new Error("Não autenticado");
-
-      // Claim da conversa se ainda não estiver atribuída — necessário para o WITH CHECK do UPDATE
-      const assignedId = conversation.assigned_agent_id ?? userId;
-
-      const { error } = await supabase.from("messages").insert({
-        conversation_id: conversation.id,
-        sender_agent_id: userId,
-        direction: "outbound",
-        type: "text",
-        content,
-        status: "sent",
-      });
-      if (error) throw error;
-      const { error: convError } = await supabase
-        .from("conversations")
-        .update({
-          assigned_agent_id: assignedId,
-          last_message_at: new Date().toISOString(),
-          last_message_preview: content,
-        })
-        .eq("id", conversation.id);
-      if (convError) throw convError;
-    },
+    mutationFn: (content: string) =>
+      sendFn({ data: { conversationId: conversation.id, text: content } }),
     onSuccess: () => {
       setText("");
       qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao enviar"),
   });
 
   const handleSend = (e: React.FormEvent) => {

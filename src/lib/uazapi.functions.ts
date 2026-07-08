@@ -447,5 +447,76 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
     return { ingested, errors, channels: channels?.length ?? 0, chats: chatsProcessed };
   });
 
+// ---------- get media URL for a message ----------
+export const getMessageMedia = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ messageId: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: msg, error: msgErr } = await supabaseAdmin
+      .from("messages")
+      .select("id, type, external_id, metadata, conversation_id, conversations(channel_id, channels(credentials))")
+      .eq("id", data.messageId).single();
+    if (msgErr || !msg) throw new Error("Mensagem não encontrada");
+
+    const meta: any = msg.metadata ?? {};
+    const media = meta.media ?? {};
+
+    if (media.storagePath) {
+      const { data: s, error } = await supabaseAdmin.storage
+        .from("attachments").createSignedUrl(media.storagePath, 60 * 60);
+      if (error || !s?.signedUrl) throw new Error("Falha ao assinar URL");
+      return { url: s.signedUrl, mimeType: media.mimeType ?? media.mimetype ?? null, filename: media.filename ?? null };
+    }
+
+    const token = ((msg as any).conversations?.channels?.credentials as any)?.token;
+    if (!token) throw new Error("Canal sem token");
+    if (!msg.external_id) throw new Error("Mensagem sem external_id — sincronize novamente");
+
+    let dl: any = null;
+    for (const path of ["/message/download", "/message/downloadmedia"]) {
+      try {
+        dl = await uazapiFetch(path, { token, body: { id: msg.external_id } });
+        if (dl) break;
+      } catch { /* try next */ }
+    }
+    if (!dl) throw new Error("Falha ao baixar mídia da uazapi");
+
+    const b64: string | undefined =
+      dl?.fileBase64 ?? dl?.base64 ?? dl?.data ?? dl?.file ?? dl?.media;
+    const mimetype: string =
+      dl?.mimetype ?? dl?.mimeType ?? media.mimetype ?? media.mimeType ?? "application/octet-stream";
+    const filename: string | undefined =
+      dl?.fileName ?? dl?.filename ?? media.filename;
+
+    if (!b64) {
+      const url: string | undefined = dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
+      if (url) return { url, mimeType: mimetype, filename: filename ?? null };
+      throw new Error("uazapi não retornou o arquivo");
+    }
+
+    const clean = b64.includes(",") ? b64.split(",", 2)[1] : b64;
+    const bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));
+
+    const extFromMime = mimetype.split("/")[1]?.split(";")[0] || "bin";
+    const path = `messages/${msg.id}.${extFromMime}`;
+
+    const { error: upErr } = await supabaseAdmin.storage
+      .from("attachments")
+      .upload(path, bytes, { contentType: mimetype, upsert: true });
+    if (upErr) throw new Error(`Falha ao salvar mídia: ${upErr.message}`);
+
+    await supabaseAdmin.from("messages").update({
+      metadata: { ...meta, media: { ...media, storagePath: path, mimeType: mimetype, filename: filename ?? media.filename } },
+    }).eq("id", msg.id);
+
+    const { data: signed, error: signErr } = await supabaseAdmin.storage
+      .from("attachments").createSignedUrl(path, 60 * 60);
+    if (signErr || !signed?.signedUrl) throw new Error("Falha ao assinar URL");
+
+    return { url: signed.signedUrl, mimeType: mimetype, filename: filename ?? null };
+  });
+
 // re-export para conveniência de consumidores que queiram tipar
 export { CHANNEL_PUBLIC_COLS };

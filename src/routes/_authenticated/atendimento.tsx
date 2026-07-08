@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck } from "lucide-react";
+import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck, RefreshCw } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -53,9 +53,10 @@ function AtendimentoPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "pending" | "resolved">("all");
 
+  const qc = useQueryClient();
   useRealtimeMessages(selectedId);
 
-  const { data: conversations = [] } = useQuery({
+  const { data: conversations = [], isFetching: isFetchingConvs, refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -65,7 +66,14 @@ function AtendimentoPage() {
       if (error) throw error;
       return (data ?? []) as unknown as Conversation[];
     },
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
   });
+
+  const handleRefresh = () => {
+    refetchConvs();
+    if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+  };
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
@@ -83,8 +91,20 @@ function AtendimentoPage() {
       {/* Coluna 1: lista de conversas */}
       <div className="w-80 border-r border-border bg-sidebar flex flex-col">
         <div className="p-3 border-b border-border">
-          <h2 className="font-semibold text-lg mb-3">Conversas</h2>
-          <div className="relative">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-lg">Conversas</h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleRefresh}
+            title="Atualizar"
+            className="h-8 w-8"
+          >
+            <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+        <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Pesquisar..."
@@ -185,6 +205,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
       if (error) throw error;
       return (data ?? []) as Message[];
     },
+    refetchInterval: 8000,
   });
 
   useEffect(() => {

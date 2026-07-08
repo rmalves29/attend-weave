@@ -53,9 +53,10 @@ function AtendimentoPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "pending" | "resolved">("all");
 
+  const qc = useQueryClient();
   useRealtimeMessages(selectedId);
 
-  const { data: conversations = [] } = useQuery({
+  const { data: conversations = [], isFetching: isFetchingConvs, refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -65,7 +66,14 @@ function AtendimentoPage() {
       if (error) throw error;
       return (data ?? []) as unknown as Conversation[];
     },
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
   });
+
+  const handleRefresh = () => {
+    refetchConvs();
+    if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+  };
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {

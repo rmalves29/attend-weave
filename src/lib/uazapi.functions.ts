@@ -343,12 +343,15 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
   });
 
 // ---------- sync history ----------
-// Puxa mensagens recentes de um canal (ou de todos) via uazapi e ingere.
+// Puxa TODO o histórico disponível de cada chat via uazapi:
+// 1) lista chats (/chat/find)
+// 2) por chat pagina /message/find até esgotar (ou atingir o teto de segurança)
+// Fallback: se /chat/find falhar, cai num /message/find global recente.
 export const syncUazapiHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
     channelId: z.string().uuid().optional(),
-    limit: z.number().int().min(1).max(500).optional(),
+    perChatLimit: z.number().int().min(1).max(10000).optional(),
   }))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -359,35 +362,93 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
     const { data: channels, error } = await q;
     if (error) throw new Error(error.message);
 
-    const limit = data.limit ?? 100;
+    const perChatCap = data.perChatLimit ?? 2000; // teto por chat
+    const PAGE = 200;
     let ingested = 0;
     let errors = 0;
+    let chatsProcessed = 0;
 
     for (const ch of channels ?? []) {
       const token = (ch.credentials as any)?.token;
       if (!token) continue;
-      let msgs: any[] = [];
+
+      // 1) tenta listar chats
+      let chats: any[] = [];
       try {
-        // uazapi: POST /message/find (ordena por timestamp desc)
-        const res = await uazapiFetch("/message/find", {
+        const res = await uazapiFetch("/chat/find", {
           token,
-          body: { sort: "-messageTimestamp", limit },
+          body: { operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 500 },
         });
-        msgs = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
+        chats = Array.isArray(res) ? res : res?.chats ?? res?.data ?? [];
       } catch (e) {
-        console.warn("[uazapi sync] find falhou:", (e as Error).message);
-        errors++;
+        console.warn("[uazapi sync] chat/find falhou:", (e as Error).message);
+      }
+
+      // 2) sem chats? faz um pull global recente
+      if (!chats.length) {
+        try {
+          const res = await uazapiFetch("/message/find", {
+            token,
+            body: { operator: "AND", sort: "-messageTimestamp", limit: 500 },
+          });
+          const msgs = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
+          for (const m of [...msgs].reverse()) {
+            try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
+            catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
+          }
+        } catch (e) {
+          console.warn("[uazapi sync] message/find global falhou:", (e as Error).message);
+          errors++;
+        }
         continue;
       }
-      // ingere do mais antigo para o mais novo (preserva ordem)
-      for (const m of [...msgs].reverse()) {
-        try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
-        catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
+
+      // 3) por chat, pagina até esgotar (ignora grupos)
+      for (const chat of chats) {
+        const chatid: string | undefined =
+          chat?.wa_chatid ?? chat?.chatid ?? chat?.id ?? chat?.jid ?? chat?.remoteJid;
+        if (!chatid || chatid.includes("@g.us")) continue;
+
+        let offset = 0;
+        let fetched = 0;
+        while (fetched < perChatCap) {
+          let page: any[] = [];
+          try {
+            const res = await uazapiFetch("/message/find", {
+              token,
+              body: {
+                operator: "AND",
+                sort: "-messageTimestamp",
+                limit: PAGE,
+                offset,
+                filters: [{ field: "chatid", operator: "=", value: chatid }],
+              },
+            });
+            page = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
+          } catch (e) {
+            console.warn("[uazapi sync] message/find falhou:", (e as Error).message);
+            errors++;
+            break;
+          }
+          if (!page.length) break;
+          // ingere na ordem cronológica (mais antigo → mais novo)
+          for (const m of [...page].reverse()) {
+            try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
+            catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
+          }
+          fetched += page.length;
+          offset += page.length;
+          if (page.length < PAGE) break; // fim do histórico
+        }
+        chatsProcessed++;
       }
     }
 
-    return { ingested, errors, channels: channels?.length ?? 0 };
+    return { ingested, errors, channels: channels?.length ?? 0, chats: chatsProcessed };
   });
+
+// re-export para conveniência de consumidores que queiram tipar
+export { CHANNEL_PUBLIC_COLS };
 
 // re-export para conveniência de consumidores que queiram tipar
 export { CHANNEL_PUBLIC_COLS };

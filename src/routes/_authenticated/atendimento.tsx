@@ -627,8 +627,7 @@ function ForwardDialog({
     </Dialog>
   );
 }
-  );
-}
+
 
 function MediaBubble({ message }: { message: Message }) {
   const fn = useServerFn(getMessageMedia);

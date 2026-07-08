@@ -2,6 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+// Colunas seguras para leitura por qualquer autenticado (sem credentials)
+const CHANNEL_PUBLIC_COLS =
+  "id, name, type, identifier, status, qr_code, last_connected_at, created_at, updated_at";
+
 // ---------- helpers ----------
 function getUazapiConfig() {
   const url = process.env.UAZAPI_URL?.replace(/\/$/, "");
@@ -47,6 +51,14 @@ async function assertAdmin(ctx: { supabase: any; userId: string }) {
   if (!data) throw new Error("Apenas administradores podem gerenciar canais.");
 }
 
+async function loadChannelWithCreds(channelId: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("channels").select("*").eq("id", channelId).single();
+  if (error || !data) throw new Error("Canal não encontrado");
+  return { channel: data, supabaseAdmin };
+}
+
 function webhookUrlFor(channelId: string) {
   const base =
     process.env.PUBLIC_APP_URL?.replace(/\/$/, "") ??
@@ -60,6 +72,7 @@ export const createUazapiInstance = createServerFn({ method: "POST" })
   .inputValidator(z.object({ name: z.string().min(1).max(60) }))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // 1. cria instância na uazapi (admintoken)
     const created = await uazapiFetch("/instance/init", {
@@ -72,8 +85,8 @@ export const createUazapiInstance = createServerFn({ method: "POST" })
       created?.id ?? created?.instance?.id ?? created?.data?.id ?? data.name;
     if (!instanceToken) throw new Error("Token da instância não retornado pela uazapi.");
 
-    // 2. salva no banco
-    const { data: channel, error } = await context.supabase
+    // 2. salva no banco (admin — credentials é coluna privilegiada)
+    const { data: channel, error } = await supabaseAdmin
       .from("channels")
       .insert({
         name: data.name,
@@ -82,7 +95,7 @@ export const createUazapiInstance = createServerFn({ method: "POST" })
         identifier: instanceId,
         credentials: { provider: "uazapi", token: instanceToken, instance_id: instanceId },
       })
-      .select()
+      .select("id")
       .single();
     if (error) throw new Error(error.message);
 
@@ -111,17 +124,15 @@ export const connectUazapiInstance = createServerFn({ method: "POST" })
   .inputValidator(z.object({ channelId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const { data: ch, error } = await context.supabase
-      .from("channels").select("*").eq("id", data.channelId).single();
-    if (error || !ch) throw new Error("Canal não encontrado");
-    const token = (ch.credentials as any)?.token;
+    const { channel, supabaseAdmin } = await loadChannelWithCreds(data.channelId);
+    const token = (channel.credentials as any)?.token;
     if (!token) throw new Error("Instância sem token uazapi");
 
     const res = await uazapiFetch("/instance/connect", { token, body: {} });
     const qr: string | undefined = res?.instance?.qrcode ?? res?.qrcode ?? res?.qr;
     const status = res?.instance?.status ?? res?.status ?? "connecting";
 
-    await context.supabase
+    await supabaseAdmin
       .from("channels")
       .update({ qr_code: qr ?? null, status: status === "connected" ? "connected" : "connecting" })
       .eq("id", data.channelId);
@@ -134,10 +145,9 @@ export const getUazapiStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ channelId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
-    const { data: ch, error } = await context.supabase
-      .from("channels").select("*").eq("id", data.channelId).single();
-    if (error || !ch) throw new Error("Canal não encontrado");
-    const token = (ch.credentials as any)?.token;
+    await assertAdmin(context);
+    const { channel, supabaseAdmin } = await loadChannelWithCreds(data.channelId);
+    const token = (channel.credentials as any)?.token;
     if (!token) throw new Error("Instância sem token uazapi");
 
     const res = await uazapiFetch("/instance/status", { token });
@@ -152,9 +162,9 @@ export const getUazapiStatus = createServerFn({ method: "POST" })
     if (mapped === "connected") {
       patch.qr_code = null;
       patch.last_connected_at = new Date().toISOString();
-      patch.identifier = res?.instance?.wid ?? res?.instance?.owner ?? ch.identifier;
+      patch.identifier = res?.instance?.wid ?? res?.instance?.owner ?? channel.identifier;
     }
-    await context.supabase.from("channels").update(patch).eq("id", data.channelId);
+    await supabaseAdmin.from("channels").update(patch).eq("id", data.channelId);
     return { status: mapped };
   });
 
@@ -164,13 +174,12 @@ export const disconnectUazapiInstance = createServerFn({ method: "POST" })
   .inputValidator(z.object({ channelId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const { data: ch } = await context.supabase
-      .from("channels").select("*").eq("id", data.channelId).single();
-    const token = (ch?.credentials as any)?.token;
+    const { channel, supabaseAdmin } = await loadChannelWithCreds(data.channelId);
+    const token = (channel.credentials as any)?.token;
     if (token) {
       try { await uazapiFetch("/instance/disconnect", { token, body: {} }); } catch {}
     }
-    await context.supabase.from("channels")
+    await supabaseAdmin.from("channels")
       .update({ status: "disconnected", qr_code: null }).eq("id", data.channelId);
     return { ok: true };
   });
@@ -181,9 +190,8 @@ export const deleteUazapiInstance = createServerFn({ method: "POST" })
   .inputValidator(z.object({ channelId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const { data: ch } = await context.supabase
-      .from("channels").select("*").eq("id", data.channelId).single();
-    const creds = (ch?.credentials as any) ?? {};
+    const { channel, supabaseAdmin } = await loadChannelWithCreds(data.channelId);
+    const creds = (channel.credentials as any) ?? {};
     const token: string | undefined = creds.token;
     const instanceId: string | undefined = creds.instance_id;
 
@@ -199,7 +207,7 @@ export const deleteUazapiInstance = createServerFn({ method: "POST" })
         console.warn("[uazapi] delete remoto falhou:", (e as Error).message);
       }
     }
-    const { error } = await context.supabase.from("channels").delete().eq("id", data.channelId);
+    const { error } = await supabaseAdmin.from("channels").delete().eq("id", data.channelId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -212,11 +220,9 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     to: z.string().min(5),
     text: z.string().min(1),
   }))
-  .handler(async ({ data, context }) => {
-    const { data: ch, error } = await context.supabase
-      .from("channels").select("*").eq("id", data.channelId).single();
-    if (error || !ch) throw new Error("Canal não encontrado");
-    const token = (ch.credentials as any)?.token;
+  .handler(async ({ data }) => {
+    const { channel } = await loadChannelWithCreds(data.channelId);
+    const token = (channel.credentials as any)?.token;
     if (!token) throw new Error("Instância sem token uazapi");
 
     const res = await uazapiFetch("/send/text", {
@@ -225,3 +231,6 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     });
     return { ok: true, id: res?.messageid ?? res?.id ?? null };
   });
+
+// re-export para conveniência de consumidores que queiram tipar
+export { CHANNEL_PUBLIC_COLS };

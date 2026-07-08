@@ -56,7 +56,7 @@ function CanaisPage() {
   const { data: channels = [] } = useQuery({
     queryKey: ["channels"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("channels").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("channels").select("id,name,type,identifier,status,qr_code,last_connected_at,created_at,updated_at").order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
@@ -100,7 +100,7 @@ function CanaisPage() {
         onCreated={(channelId: string) => {
           invalidate();
           setTimeout(async () => {
-            const { data } = await supabase.from("channels").select("*").eq("id", channelId).single();
+            const { data } = await supabase.from("channels").select("id,name,type,identifier,status,qr_code,last_connected_at,created_at,updated_at").eq("id", channelId).single();
             if (data) setQrChannel(data);
           }, 300);
         }}

@@ -1,14 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
+import { sendUazapiMessage, syncUazapiHistory } from "@/lib/uazapi.functions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck, RefreshCw } from "lucide-react";
+import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud } from "lucide-react";
+import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -70,6 +73,17 @@ function AtendimentoPage() {
     refetchOnWindowFocus: true,
   });
 
+  const syncFn = useServerFn(syncUazapiHistory);
+  const syncMutation = useMutation({
+    mutationFn: () => syncFn({ data: { limit: 200 } }),
+    onSuccess: (r) => {
+      toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+      refetchConvs();
+      if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao sincronizar"),
+  });
+
   const handleRefresh = () => {
     refetchConvs();
     if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
@@ -93,16 +107,29 @@ function AtendimentoPage() {
         <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-lg">Conversas</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={handleRefresh}
-            title="Atualizar"
-            className="h-8 w-8"
-          >
-            <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              title="Sincronizar histórico da uazapi"
+              className="h-8 w-8"
+            >
+              <DownloadCloud className={`w-4 h-4 ${syncMutation.isPending ? "animate-pulse" : ""}`} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              title="Atualizar"
+              className="h-8 w-8"
+            >
+              <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
         <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -212,39 +239,16 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
 
+  const sendFn = useServerFn(sendUazapiMessage);
   const sendMutation = useMutation({
-    mutationFn: async (content: string) => {
-      const { data: u } = await supabase.auth.getUser();
-      const userId = u.user?.id;
-      if (!userId) throw new Error("Não autenticado");
-
-      // Claim da conversa se ainda não estiver atribuída — necessário para o WITH CHECK do UPDATE
-      const assignedId = conversation.assigned_agent_id ?? userId;
-
-      const { error } = await supabase.from("messages").insert({
-        conversation_id: conversation.id,
-        sender_agent_id: userId,
-        direction: "outbound",
-        type: "text",
-        content,
-        status: "sent",
-      });
-      if (error) throw error;
-      const { error: convError } = await supabase
-        .from("conversations")
-        .update({
-          assigned_agent_id: assignedId,
-          last_message_at: new Date().toISOString(),
-          last_message_preview: content,
-        })
-        .eq("id", conversation.id);
-      if (convError) throw convError;
-    },
+    mutationFn: (content: string) =>
+      sendFn({ data: { conversationId: conversation.id, text: content } }),
     onSuccess: () => {
       setText("");
       qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao enviar"),
   });
 
   const handleSend = (e: React.FormEvent) => {

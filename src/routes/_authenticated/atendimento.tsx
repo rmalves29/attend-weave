@@ -641,7 +641,7 @@ function ForwardDialog({
 function MediaBubble({ message }: { message: Message }) {
   const fn = useServerFn(getMessageMedia);
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["message-media", message.id],
+    queryKey: ["message-media-v2", message.id],
     queryFn: () => fn({ data: { messageId: message.id } }),
     staleTime: 55 * 60 * 1000,
     retry: 1,

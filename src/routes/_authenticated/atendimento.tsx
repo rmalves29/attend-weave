@@ -205,6 +205,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
       if (error) throw error;
       return (data ?? []) as Message[];
     },
+    refetchInterval: 8000,
   });
 
   useEffect(() => {

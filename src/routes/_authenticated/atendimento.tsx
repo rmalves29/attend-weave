@@ -77,7 +77,7 @@ function AtendimentoPage() {
 
   const syncFn = useServerFn(syncUazapiHistory);
   const syncMutation = useMutation({
-    mutationFn: () => syncFn({ data: { limit: 200 } }),
+    mutationFn: () => syncFn({ data: {} }),
     onSuccess: (r) => {
       toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
       refetchConvs();

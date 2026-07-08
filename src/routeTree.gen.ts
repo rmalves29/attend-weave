@@ -17,6 +17,7 @@ import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authen
 import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
 import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
 import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
+import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -60,6 +61,12 @@ const ApiPublicUazapiWebhookChannelIdRoute =
     path: '/api/public/uazapi-webhook/$channelId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicMessageMediaMessageIdRoute =
+  ApiPublicMessageMediaMessageIdRouteImport.update({
+    id: '/api/public/message-media/$messageId',
+    path: '/api/public/message-media/$messageId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -68,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRoutesByTo {
@@ -77,6 +85,7 @@ export interface FileRoutesByTo {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRoutesById {
@@ -88,6 +97,7 @@ export interface FileRoutesById {
   '/_authenticated/canais': typeof AuthenticatedCanaisRoute
   '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRouteTypes {
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   id:
     | '__root__'
@@ -118,6 +130,7 @@ export interface FileRouteTypes {
     | '/_authenticated/canais'
     | '/_authenticated/configuracoes'
     | '/_authenticated/relatorios'
+    | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesById: FileRoutesById
 }
@@ -125,6 +138,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicMessageMediaMessageIdRoute: typeof ApiPublicMessageMediaMessageIdRoute
   ApiPublicUazapiWebhookChannelIdRoute: typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 
@@ -186,6 +200,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicUazapiWebhookChannelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/message-media/$messageId': {
+      id: '/api/public/message-media/$messageId'
+      path: '/api/public/message-media/$messageId'
+      fullPath: '/api/public/message-media/$messageId'
+      preLoaderRoute: typeof ApiPublicMessageMediaMessageIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -210,6 +231,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicMessageMediaMessageIdRoute: ApiPublicMessageMediaMessageIdRoute,
   ApiPublicUazapiWebhookChannelIdRoute: ApiPublicUazapiWebhookChannelIdRoute,
 }
 export const routeTree = rootRouteImport

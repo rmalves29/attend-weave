@@ -1,14 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/api/public/message-media/$messageId")({
-  server: {
-    handlers: {
-      GET: handleMediaRequest,
-      HEAD: handleMediaRequest,
-    },
-  },
-});
-
 async function handleMediaRequest({ request, params }: { request: Request; params: { messageId: string } }) {
   const url = new URL(request.url);
   const { verifyMediaSignature, createMediaProxyResponse } = await import("@/lib/uazapi-media.server");
@@ -24,3 +15,12 @@ async function handleMediaRequest({ request, params }: { request: Request; param
     return new Response("media unavailable", { status: 404 });
   }
 }
+
+export const Route = createFileRoute("/api/public/message-media/$messageId")({
+  server: {
+    handlers: {
+      GET: handleMediaRequest,
+      HEAD: handleMediaRequest,
+    },
+  },
+});

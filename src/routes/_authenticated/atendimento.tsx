@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck } from "lucide-react";
+import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck, RefreshCw } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 

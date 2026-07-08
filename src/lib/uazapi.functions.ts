@@ -213,23 +213,102 @@ export const deleteUazapiInstance = createServerFn({ method: "POST" })
   });
 
 // ---------- send message ----------
+// Envia via uazapi E persiste a mensagem no banco (assim aparece na UI
+// mesmo se o webhook fromMe não devolver). Deduplicação por external_id
+// evita duplicata quando o webhook eventualmente também chegar.
 export const sendUazapiMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
-    channelId: z.string().uuid(),
-    to: z.string().min(5),
+    conversationId: z.string().uuid(),
     text: z.string().min(1),
   }))
-  .handler(async ({ data }) => {
-    const { channel } = await loadChannelWithCreds(data.channelId);
-    const token = (channel.credentials as any)?.token;
-    if (!token) throw new Error("Instância sem token uazapi");
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from("conversations")
+      .select("id, channel_id, contact_id, assigned_agent_id, unread_count, contacts(phone), channels(credentials)")
+      .eq("id", data.conversationId).single();
+    if (convErr || !conv) throw new Error("Conversa não encontrada");
+
+    const phone = (conv as any).contacts?.phone as string | null;
+    if (!phone) throw new Error("Contato sem telefone");
+    const token = ((conv as any).channels?.credentials as any)?.token;
+    if (!token) throw new Error("Canal sem token uazapi");
 
     const res = await uazapiFetch("/send/text", {
       token,
-      body: { number: data.to, text: data.text },
+      body: { number: phone, text: data.text },
     });
-    return { ok: true, id: res?.messageid ?? res?.id ?? null };
+    const externalId: string | null =
+      res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
+
+    const { error: insErr } = await supabaseAdmin.from("messages").insert({
+      conversation_id: conv.id,
+      sender_agent_id: context.userId,
+      direction: "outbound",
+      type: "text",
+      content: data.text,
+      status: "sent",
+      external_id: externalId,
+      metadata: { uazapi: res },
+    });
+    if (insErr && (insErr as any).code !== "23505") throw insErr;
+
+    await supabaseAdmin.from("conversations").update({
+      assigned_agent_id: conv.assigned_agent_id ?? context.userId,
+      last_message_at: new Date().toISOString(),
+      last_message_preview: data.text.slice(0, 120),
+    }).eq("id", conv.id);
+
+    return { ok: true, id: externalId };
+  });
+
+// ---------- sync history ----------
+// Puxa mensagens recentes de um canal (ou de todos) via uazapi e ingere.
+export const syncUazapiHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    channelId: z.string().uuid().optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  }))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { ingestMessage } = await import("./uazapi-ingest.server");
+
+    const q = supabaseAdmin.from("channels").select("*").eq("type", "whatsapp");
+    if (data.channelId) q.eq("id", data.channelId);
+    const { data: channels, error } = await q;
+    if (error) throw new Error(error.message);
+
+    const limit = data.limit ?? 100;
+    let ingested = 0;
+    let errors = 0;
+
+    for (const ch of channels ?? []) {
+      const token = (ch.credentials as any)?.token;
+      if (!token) continue;
+      let msgs: any[] = [];
+      try {
+        // uazapi: POST /message/find (ordena por timestamp desc)
+        const res = await uazapiFetch("/message/find", {
+          token,
+          body: { sort: "-messageTimestamp", limit },
+        });
+        msgs = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
+      } catch (e) {
+        console.warn("[uazapi sync] find falhou:", (e as Error).message);
+        errors++;
+        continue;
+      }
+      // ingere do mais antigo para o mais novo (preserva ordem)
+      for (const m of [...msgs].reverse()) {
+        try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
+        catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
+      }
+    }
+
+    return { ingested, errors, channels: channels?.length ?? 0 };
   });
 
 // re-export para conveniência de consumidores que queiram tipar

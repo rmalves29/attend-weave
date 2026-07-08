@@ -73,6 +73,17 @@ function AtendimentoPage() {
     refetchOnWindowFocus: true,
   });
 
+  const syncFn = useServerFn(syncUazapiHistory);
+  const syncMutation = useMutation({
+    mutationFn: () => syncFn({ data: { limit: 200 } }),
+    onSuccess: (r) => {
+      toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+      refetchConvs();
+      if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao sincronizar"),
+  });
+
   const handleRefresh = () => {
     refetchConvs();
     if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });

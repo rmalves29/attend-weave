@@ -58,7 +58,10 @@ type Message = {
   content: string | null;
   status: string;
   created_at: string;
+  metadata?: any;
 };
+
+type ReplyDraft = { id: string; content: string; type: string; direction: string };
 
 const channelIcon = (type: string) => {
   if (type === "instagram") return <Instagram className="w-3 h-3" />;

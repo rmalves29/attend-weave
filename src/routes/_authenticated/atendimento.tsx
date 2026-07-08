@@ -221,7 +221,9 @@ function AtendimentoPage() {
 function ChatWindow({ conversation }: { conversation: Conversation }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", conversation.id],
@@ -253,11 +255,49 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     onError: (e: any) => toast.error(e?.message ?? "Falha ao enviar"),
   });
 
+  const sendMediaFn = useServerFn(sendUazapiMedia);
+  const mediaMutation = useMutation({
+    mutationFn: async (file: File) => {
+      if (file.size > 20 * 1024 * 1024) throw new Error("Arquivo maior que 20MB");
+      const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
+      const path = `${conversation.id}/${crypto.randomUUID()}${ext ? "." + ext : ""}`;
+      const { error: upErr } = await supabase.storage
+        .from("attachments")
+        .upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+      if (upErr) throw upErr;
+      return sendMediaFn({
+        data: {
+          conversationId: conversation.id,
+          storagePath: path,
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          caption: text.trim() || undefined,
+        },
+      });
+    },
+    onSuccess: () => {
+      setText("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => {
+      toast.error(e?.message ?? "Falha ao enviar arquivo");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+  });
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
     sendMutation.mutate(t);
+  };
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    mediaMutation.mutate(f);
   };
 
   return (
@@ -307,8 +347,46 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
       </div>
 
       <form onSubmit={handleSend} className="bg-[var(--chat-panel)] px-4 py-3 flex items-center gap-2 border-t border-border">
-        <Button type="button" variant="ghost" size="icon"><Smile className="w-5 h-5" /></Button>
-        <Button type="button" variant="ghost" size="icon"><Paperclip className="w-5 h-5" /></Button>
+        <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" title="Emojis">
+              <Smile className="w-5 h-5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent side="top" align="start" className="p-0 w-auto border-0 bg-transparent shadow-none">
+            <EmojiPicker
+              theme={Theme.AUTO}
+              emojiStyle={EmojiStyle.NATIVE}
+              onEmojiClick={(e) => {
+                setText((prev) => prev + e.emoji);
+              }}
+              searchPlaceholder="Buscar emoji..."
+              width={320}
+              height={380}
+            />
+          </PopoverContent>
+        </Popover>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFilePick}
+          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          title="Anexar arquivo"
+          disabled={mediaMutation.isPending}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {mediaMutation.isPending
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <Paperclip className="w-5 h-5" />}
+        </Button>
+
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}

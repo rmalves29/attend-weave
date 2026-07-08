@@ -18,6 +18,7 @@ export function useRealtimeMessages(conversationId?: string | null) {
         (payload) => {
           const convId = (payload.new as any)?.conversation_id ?? (payload.old as any)?.conversation_id;
           qc.invalidateQueries({ queryKey: ["messages", convId] });
+          qc.invalidateQueries({ queryKey: ["messages"] });
           qc.invalidateQueries({ queryKey: ["conversations"] });
         }
       )

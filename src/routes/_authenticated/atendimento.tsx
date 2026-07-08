@@ -97,14 +97,14 @@ function AtendimentoPage() {
     onSuccess: (r) => {
       toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
       refetchConvs();
-      if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+      if (selectedId) qc.invalidateQueries({ queryKey: ["messages"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao sincronizar"),
   });
 
   const handleRefresh = () => {
     refetchConvs();
-    if (selectedId) qc.invalidateQueries({ queryKey: ["messages", selectedId] });
+    if (selectedId) qc.invalidateQueries({ queryKey: ["messages"] });
   };
 
   const filtered = useMemo(() => {
@@ -244,12 +244,21 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: messages = [] } = useQuery({
-    queryKey: ["messages", conversation.id],
+    queryKey: ["messages", conversation.contact_id, conversation.channel_id],
     queryFn: async () => {
+      const { data: relatedConversations, error: convErr } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("contact_id", conversation.contact_id)
+        .eq("channel_id", conversation.channel_id);
+      if (convErr) throw convErr;
+      const ids = (relatedConversations ?? []).map((c) => c.id);
+      if (!ids.length) return [] as Message[];
+
       const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("conversation_id", conversation.id)
+        .in("conversation_id", ids)
         .order("created_at", { ascending: true });
       if (error) throw error;
       return (data ?? []) as Message[];
@@ -267,7 +276,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
       sendFn({ data: { conversationId: conversation.id, text: content, replyToMessageId: reply?.id } }),
     onSuccess: () => {
       setText(""); setReply(null);
-      qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      qc.invalidateQueries({ queryKey: ["messages"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao enviar"),
@@ -297,7 +306,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     onSuccess: () => {
       setText(""); setReply(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      qc.invalidateQueries({ queryKey: ["messages"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: any) => {
@@ -311,7 +320,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     mutationFn: (id: string) => deleteFn({ data: { messageId: id } }),
     onSuccess: () => {
       toast.success("Mensagem apagada");
-      qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      qc.invalidateQueries({ queryKey: ["messages"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao apagar"),

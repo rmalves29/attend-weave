@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { createDecipheriv, createHash, createHmac, randomUUID, timingSafeEqual } from "crypto";
 
 type SupabaseAdmin = any;
 
@@ -37,6 +37,40 @@ async function uazapiFetch(
     throw new Error(`uazapi: ${msg}`);
   }
   return data;
+}
+
+async function uazapiFetchDownload(
+  path: string,
+  opts: { token?: string; body?: unknown } = {},
+) {
+  const { url } = getUazapiConfig();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.token) headers.token = opts.token;
+
+  const res = await fetch(`${url}${path}`, {
+    method: "POST",
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const text = new TextDecoder().decode(bytes);
+      const json = JSON.parse(text);
+      msg = json?.error ?? json?.message ?? text.slice(0, 160) ?? msg;
+    } catch {
+      msg = new TextDecoder().decode(bytes).slice(0, 160) || msg;
+    }
+    throw new Error(`uazapi: ${msg}`);
+  }
+  if (/application\/json|text\/json/i.test(contentType)) {
+    const text = new TextDecoder().decode(bytes);
+    return text ? JSON.parse(text) : null;
+  }
+  if (!bytes.byteLength) throw new Error("arquivo vazio");
+  return { __binary: true, bytes, contentType };
 }
 
 function getSigningSecret() {
@@ -131,6 +165,71 @@ function isProbablyUrl(value: unknown): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function normalizeMediaUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const url = value.trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/")) return `https://mmg.whatsapp.net${url}`;
+  return undefined;
+}
+
+function isWhatsappMediaUrl(value: string) {
+  try {
+    const u = new URL(value);
+    return /(^|\.)whatsapp\.net$/i.test(u.hostname) || /(^|\.)cdn\.whatsapp\.net$/i.test(u.hostname) || value.includes(".enc");
+  } catch {
+    return value.includes(".enc") || value.includes("whatsapp.net");
+  }
+}
+
+function mediaKeyCandidate(media: any, raw: any) {
+  return pickFirst({ media, raw }, [
+    ["media", "mediaKey"],
+    ["media", "mediakey"],
+    ["raw", "content", "mediaKey"],
+    ["raw", "content", "mediakey"],
+    ["raw", "message", "imageMessage", "mediaKey"],
+    ["raw", "message", "videoMessage", "mediaKey"],
+    ["raw", "message", "audioMessage", "mediaKey"],
+    ["raw", "message", "documentMessage", "mediaKey"],
+  ]);
+}
+
+function whatsappInfoFor(messageType: string | null | undefined) {
+  if (messageType === "image") return "WhatsApp Image Keys";
+  if (messageType === "video") return "WhatsApp Video Keys";
+  if (messageType === "audio") return "WhatsApp Audio Keys";
+  return "WhatsApp Document Keys";
+}
+
+function hkdfSha256(input: Buffer, info: string, length: number) {
+  const salt = Buffer.alloc(32);
+  const prk = createHmac("sha256", salt).update(input).digest();
+  const blocks: Buffer[] = [];
+  let previous = Buffer.alloc(0);
+  let counter = 1;
+  while (Buffer.concat(blocks).length < length) {
+    previous = createHmac("sha256", prk)
+      .update(Buffer.concat([previous, Buffer.from(info), Buffer.from([counter++])]))
+      .digest();
+    blocks.push(previous);
+  }
+  return Buffer.concat(blocks).subarray(0, length);
+}
+
+function decryptWhatsAppMedia(bytes: Uint8Array, mediaKeyRaw: unknown, messageType: string | null | undefined) {
+  if (typeof mediaKeyRaw !== "string" || !mediaKeyRaw.trim()) throw new Error("mediaKey ausente");
+  const mediaKey = Buffer.from(cleanBase64(mediaKeyRaw), "base64");
+  if (mediaKey.length !== 32) throw new Error("mediaKey inválida");
+  const expanded = hkdfSha256(mediaKey, whatsappInfoFor(messageType), 112);
+  const iv = expanded.subarray(0, 16);
+  const cipherKey = expanded.subarray(16, 48);
+  const encrypted = Buffer.from(bytes);
+  const payload = encrypted.length > 10 ? encrypted.subarray(0, -10) : encrypted;
+  const decipher = createDecipheriv("aes-256-cbc", cipherKey, iv);
+  return new Uint8Array(Buffer.concat([decipher.update(payload), decipher.final()]));
+}
+
 async function fetchRemoteBytes(url: string, token?: string) {
   const attempts: RequestInit[] = [
     {},
@@ -216,27 +315,33 @@ function directUrlCandidates(media: any, raw: any, dl?: any) {
   for (const value of [
     media?.cachedUrl,
     media?.url,
+    media?.directPath,
     media?.fileURL,
     media?.fileUrl,
     media?.mediaUrl,
+    raw?.content?.URL,
     raw?.content?.fileURL,
     raw?.content?.fileUrl,
     raw?.content?.mediaUrl,
     raw?.content?.url,
+    raw?.content?.directPath,
     raw?.fileURL,
     raw?.fileUrl,
     raw?.mediaUrl,
     raw?.url,
+    raw?.directPath,
     dl?.fileURL,
     dl?.fileUrl,
     dl?.mediaUrl,
     dl?.url,
+    dl?.directPath,
     dl?.data?.fileURL,
     dl?.data?.fileUrl,
     dl?.data?.mediaUrl,
     dl?.data?.url,
+    dl?.data?.directPath,
   ]) pushUnique(urls, value);
-  return urls.filter(isProbablyUrl);
+  return urls.map(normalizeMediaUrl).filter((url): url is string => !!url && isProbablyUrl(url));
 }
 
 function base64Candidates(dl: any) {
@@ -271,14 +376,31 @@ export async function resolveMessageMediaToStorage(
   const raw = meta.raw ?? {};
   const storedMime = normalizeMime(media.mimeType ?? media.mimetype ?? raw?.content?.mimetype, msg.type);
   const storedFilename = media.filename ?? media.fileName ?? raw?.content?.fileName ?? null;
-  if (media.storagePath) {
+  if (media.storagePath && !(media.sourceUrl && isWhatsappMediaUrl(media.sourceUrl) && !media.decryptedAt)) {
     return { storagePath: media.storagePath, mimeType: storedMime, filename: storedFilename };
   }
 
   const token = (msg as any).conversations?.channels?.credentials?.token as string | undefined;
 
+  const mediaKey = mediaKeyCandidate(media, raw);
+  if (mediaKey) {
+    for (const url of directUrlCandidates(media, raw).filter(isWhatsappMediaUrl)) {
+      try {
+        const encrypted = await fetchRemoteBytes(url, token);
+        const decrypted = decryptWhatsAppMedia(encrypted.bytes, mediaKey, msg.type);
+        return await storeAndPatch(supabaseAdmin, msg, meta, media, decrypted, storedMime, storedFilename, {
+          sourceUrl: url,
+          decryptedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        lastErr = (e as Error).message;
+      }
+    }
+  }
+
   let lastErr = "";
   for (const url of directUrlCandidates(media, raw)) {
+    if (isWhatsappMediaUrl(url)) continue;
     try {
       const remote = await fetchRemoteBytes(url, token);
       const mimeType = normalizeMime(remote.contentType || storedMime, msg.type);
@@ -314,10 +436,17 @@ export async function resolveMessageMediaToStorage(
       for (const body of bodyFor(id)) {
         let dl: any;
         try {
-          dl = await uazapiFetch(endpoint, { token, body });
+          dl = await uazapiFetchDownload(endpoint, { token, body });
         } catch (e) {
           lastErr = (e as Error).message;
           continue;
+        }
+
+        if (dl?.__binary) {
+          const mimeType = normalizeMime(dl.contentType || storedMime, msg.type);
+          return await storeAndPatch(supabaseAdmin, msg, meta, media, dl.bytes, mimeType, storedFilename, {
+            downloadedBy: endpoint,
+          });
         }
 
         const dlMime = normalizeMime(

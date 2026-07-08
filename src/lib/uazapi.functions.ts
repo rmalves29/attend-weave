@@ -637,104 +637,20 @@ export const getMessageMedia = createServerFn({ method: "POST" })
   .inputValidator(z.object({ messageId: z.string().uuid() }))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { resolveMessageMediaToStorage, signMediaUrlPath } = await import("./uazapi-media.server");
 
     const { data: msg, error: msgErr } = await supabaseAdmin
       .from("messages")
-      .select("id, type, external_id, metadata, conversation_id, conversations(channel_id, channels(credentials))")
+      .select("id, metadata")
       .eq("id", data.messageId).single();
     if (msgErr || !msg) throw new Error("Mensagem não encontrada");
 
-    const meta: any = msg.metadata ?? {};
-    const media = meta.media ?? {};
-    const raw = meta.raw ?? {};
-
-    // 1a) URL já cacheada pela uazapi
-    if (media.cachedUrl) {
-      return { url: media.cachedUrl, mimeType: media.mimeType ?? media.mimetype ?? null, filename: media.filename ?? null };
-    }
-    // 1b) já temos arquivo no bucket
-    if (media.storagePath) {
-      const { data: s, error } = await supabaseAdmin.storage
-        .from("attachments").createSignedUrl(media.storagePath, 60 * 60);
-      if (error || !s?.signedUrl) throw new Error("Falha ao assinar URL");
-      return { url: s.signedUrl, mimeType: media.mimeType ?? media.mimetype ?? null, filename: media.filename ?? null };
-    }
-
-    const token = ((msg as any).conversations?.channels?.credentials as any)?.token;
-    if (!token) throw new Error("Canal sem token");
-
-    // ids possíveis pra baixar (uazapi aceita várias formas)
-    const candidateIds: string[] = [];
-    const push = (v: unknown) => { if (typeof v === "string" && v && !candidateIds.includes(v)) candidateIds.push(v); };
-    push(raw?.messageid);
-    push(raw?.messageId);
-    push(raw?.id);
-    push(msg.external_id);
-    if (msg.external_id?.includes(":")) push(msg.external_id.split(":").pop()!);
-    if (!candidateIds.length) throw new Error("Mensagem sem id da uazapi");
-
-    // tenta várias combinações de endpoint × payload
-    let dl: any = null;
-    let lastErr = "";
-    outer:
-    for (const path of ["/message/download", "/message/downloadmedia"]) {
-      for (const id of candidateIds) {
-        for (const body of [{ id }, { messageid: id }, { messageId: id }]) {
-          try {
-            const r = await uazapiFetch(path, { token, body });
-            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media ||
-                      r.fileURL || r.url || r.mediaUrl || r.fileUrl)) {
-              dl = r; break outer;
-            }
-          } catch (e) { lastErr = (e as Error).message; }
-        }
-      }
-    }
-    if (!dl) throw new Error(`Falha ao baixar mídia da uazapi${lastErr ? `: ${lastErr}` : ""}`);
-
-    const b64: string | undefined =
-      dl?.fileBase64 ?? dl?.base64 ?? dl?.data ?? dl?.file ?? dl?.media;
-    const mimetype: string =
-      dl?.mimetype ?? dl?.mimeType ?? media.mimetype ?? media.mimeType ??
-      raw?.content?.mimetype ?? "application/octet-stream";
-    const filename: string | undefined =
-      dl?.fileName ?? dl?.filename ?? media.filename ?? raw?.content?.fileName;
-
-    // uazapi cacheia o arquivo e devolve URL pública própria — usa direto,
-    // sem re-upload pro Storage (mais rápido e evita cota).
-    const directUrl: string | undefined =
-      dl?.fileURL ?? dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
-    if (directUrl) {
-      // guarda no metadata pra próximas visualizações não baterem na uazapi
-      await supabaseAdmin.from("messages").update({
-        metadata: { ...meta, media: { ...media, cachedUrl: directUrl, mimeType: mimetype, filename: filename ?? media.filename } },
-      }).eq("id", msg.id);
-      return { url: directUrl, mimeType: mimetype, filename: filename ?? null };
-    }
-
-    if (!b64) throw new Error("uazapi não retornou o arquivo");
-
-
-    const clean = b64.includes(",") ? b64.split(",", 2)[1] : b64;
-    const bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));
-
-    const extFromMime = mimetype.split("/")[1]?.split(";")[0] || "bin";
-    const path = `messages/${msg.id}.${extFromMime}`;
-
-    const { error: upErr } = await supabaseAdmin.storage
-      .from("attachments")
-      .upload(path, bytes, { contentType: mimetype, upsert: true });
-    if (upErr) throw new Error(`Falha ao salvar mídia: ${upErr.message}`);
-
-    await supabaseAdmin.from("messages").update({
-      metadata: { ...meta, media: { ...media, storagePath: path, mimeType: mimetype, filename: filename ?? media.filename } },
-    }).eq("id", msg.id);
-
-    const { data: signed, error: signErr } = await supabaseAdmin.storage
-      .from("attachments").createSignedUrl(path, 60 * 60);
-    if (signErr || !signed?.signedUrl) throw new Error("Falha ao assinar URL");
-
-    return { url: signed.signedUrl, mimeType: mimetype, filename: filename ?? null };
+    const media = await resolveMessageMediaToStorage(supabaseAdmin, msg.id);
+    return {
+      url: signMediaUrlPath(msg.id),
+      mimeType: media.mimeType,
+      filename: media.filename,
+    };
   });
 
 // re-export para conveniência de consumidores que queiram tipar

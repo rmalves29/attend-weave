@@ -464,7 +464,11 @@ export const getMessageMedia = createServerFn({ method: "POST" })
     const media = meta.media ?? {};
     const raw = meta.raw ?? {};
 
-    // 1) já temos arquivo no bucket
+    // 1a) URL já cacheada pela uazapi
+    if (media.cachedUrl) {
+      return { url: media.cachedUrl, mimeType: media.mimeType ?? media.mimetype ?? null, filename: media.filename ?? null };
+    }
+    // 1b) já temos arquivo no bucket
     if (media.storagePath) {
       const { data: s, error } = await supabaseAdmin.storage
         .from("attachments").createSignedUrl(media.storagePath, 60 * 60);

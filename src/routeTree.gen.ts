@@ -16,6 +16,7 @@ import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authentic
 import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
 import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
 import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
+import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -53,6 +54,12 @@ const AuthenticatedAtendimentoRoute =
     path: '/atendimento',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicUazapiWebhookChannelIdRoute =
+  ApiPublicUazapiWebhookChannelIdRouteImport.update({
+    id: '/api/public/uazapi-webhook/$channelId',
+    path: '/api/public/uazapi-webhook/$channelId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +68,7 @@ export interface FileRoutesByFullPath {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -69,6 +77,7 @@ export interface FileRoutesByTo {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -79,6 +88,7 @@ export interface FileRoutesById {
   '/_authenticated/canais': typeof AuthenticatedCanaisRoute
   '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/uazapi-webhook/$channelId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/uazapi-webhook/$channelId'
   id:
     | '__root__'
     | '/'
@@ -106,12 +118,14 @@ export interface FileRouteTypes {
     | '/_authenticated/canais'
     | '/_authenticated/configuracoes'
     | '/_authenticated/relatorios'
+    | '/api/public/uazapi-webhook/$channelId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicUazapiWebhookChannelIdRoute: typeof ApiPublicUazapiWebhookChannelIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -165,6 +179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAtendimentoRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/uazapi-webhook/$channelId': {
+      id: '/api/public/uazapi-webhook/$channelId'
+      path: '/api/public/uazapi-webhook/$channelId'
+      fullPath: '/api/public/uazapi-webhook/$channelId'
+      preLoaderRoute: typeof ApiPublicUazapiWebhookChannelIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -189,6 +210,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicUazapiWebhookChannelIdRoute: ApiPublicUazapiWebhookChannelIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -97,9 +97,8 @@ function CanaisPage() {
       <NewInstanceDialog
         open={newOpen}
         onOpenChange={setNewOpen}
-        onCreated={(channelId) => {
+        onCreated={(channelId: string) => {
           invalidate();
-          const ch = { id: channelId } as any;
           setTimeout(async () => {
             const { data } = await supabase.from("channels").select("*").eq("id", channelId).single();
             if (data) setQrChannel(data);
@@ -109,12 +108,12 @@ function CanaisPage() {
 
       <QrDialog
         channel={qrChannel}
-        onOpenChange={(o) => { if (!o) setQrChannel(null); invalidate(); }}
+        onOpenChange={(o: boolean) => { if (!o) setQrChannel(null); invalidate(); }}
       />
 
       <DeleteDialog
         channelId={deleteId}
-        onOpenChange={(o) => !o && setDeleteId(null)}
+        onOpenChange={(o: boolean) => !o && setDeleteId(null)}
         onDeleted={invalidate}
       />
     </div>

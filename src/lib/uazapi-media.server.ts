@@ -381,6 +381,7 @@ export async function resolveMessageMediaToStorage(
   }
 
   const token = (msg as any).conversations?.channels?.credentials?.token as string | undefined;
+  let lastErr = "";
 
   const mediaKey = mediaKeyCandidate(media, raw);
   if (mediaKey) {
@@ -398,7 +399,6 @@ export async function resolveMessageMediaToStorage(
     }
   }
 
-  let lastErr = "";
   for (const url of directUrlCandidates(media, raw)) {
     if (isWhatsappMediaUrl(url)) continue;
     try {

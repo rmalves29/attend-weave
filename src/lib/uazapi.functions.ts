@@ -403,7 +403,6 @@ export const deleteUazapiMessage = createServerFn({ method: "POST" })
     const meta = (msg.metadata as any) ?? {};
     await supabaseAdmin.from("messages").update({
       content: "🗑️ Mensagem apagada",
-      status: "deleted",
       metadata: { ...meta, deleted: true },
     }).eq("id", msg.id);
 

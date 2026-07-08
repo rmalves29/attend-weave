@@ -74,7 +74,7 @@ async function uazapiFetchDownload(
 }
 
 function getSigningSecret() {
-  const secret = process.env.UAZAPI_ADMIN_TOKEN ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secret = process.env.MEDIA_SIGNING_SECRET ?? process.env.UAZAPI_ADMIN_TOKEN ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!secret) throw new Error("Assinatura de mídia indisponível");
   return secret;
 }

@@ -1,0 +1,1 @@
+CREATE POLICY "Authenticated can upload to attachments" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'attachments'); CREATE POLICY "Authenticated can read attachments" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'attachments');

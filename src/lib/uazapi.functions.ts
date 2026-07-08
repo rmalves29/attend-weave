@@ -571,14 +571,29 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       const token = (ch.credentials as any)?.token;
       if (!token) continue;
 
-      // 1) tenta listar chats
+      // 1) tenta listar todos os chats disponíveis do número conectado
       let chats: any[] = [];
       try {
-        const res = await uazapiFetch("/chat/find", {
-          token,
-          body: { operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 500 },
-        });
-        chats = Array.isArray(res) ? res : res?.chats ?? res?.data ?? [];
+        const seenChats = new Set<string>();
+        const CHAT_PAGE = 200;
+        let chatOffset = 0;
+        while (chatOffset < 5000) {
+          const res = await uazapiFetch("/chat/find", {
+            token,
+            body: { operator: "AND", sort: "-wa_lastMsgTimestamp", limit: CHAT_PAGE, offset: chatOffset },
+          });
+          const page = Array.isArray(res) ? res : res?.chats ?? res?.data ?? [];
+          if (!page.length) break;
+          for (const chat of page) {
+            const chatid = chat?.wa_chatid ?? chat?.chatid ?? chat?.id ?? chat?.jid ?? chat?.remoteJid;
+            if (chatid && !seenChats.has(chatid)) {
+              seenChats.add(chatid);
+              chats.push(chat);
+            }
+          }
+          chatOffset += page.length;
+          if (page.length < CHAT_PAGE) break;
+        }
       } catch (e) {
         console.warn("[uazapi sync] chat/find falhou:", (e as Error).message);
       }

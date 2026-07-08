@@ -121,15 +121,22 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   const content = caption || previewLabel || "[mídia]";
 
   // upsert contato (por telefone — sistema single-tenant)
+  // IMPORTANTE: pushName em mensagens outbound (fromMe) é o dono da conta,
+  // não o cliente. Só usamos pushName quando a mensagem é inbound.
+  const contactName = !fromMe && pushName ? pushName : null;
   let contactId: string;
   const { data: existing } = await sb
-    .from("contacts").select("id").eq("phone", phone).maybeSingle();
+    .from("contacts").select("id, name").eq("phone", phone).maybeSingle();
   if (existing) {
     contactId = existing.id;
+    // Atualiza nome se o atual é só o telefone e agora temos um nome real
+    if (contactName && (!existing.name || existing.name === phone)) {
+      await sb.from("contacts").update({ name: contactName }).eq("id", contactId);
+    }
   } else {
     const { data: created, error } = await sb.from("contacts")
       .insert({
-        name: pushName || phone,
+        name: contactName || phone,
         phone,
         source_channel_id: channelId,
         external_id: remoteJid,

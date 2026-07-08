@@ -15,6 +15,19 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           .from("channels").select("id, credentials").eq("id", channelId).single();
         if (!channel) return new Response("channel not found", { status: 404 });
 
+        // valida token da instância (uazapi envia no payload ou no header)
+        const expectedToken = (channel.credentials as any)?.token;
+        const providedToken =
+          request.headers.get("token") ??
+          request.headers.get("x-token") ??
+          payload?.token ??
+          payload?.instance?.token ??
+          payload?.data?.token;
+        if (!expectedToken || providedToken !== expectedToken) {
+          console.warn("[uazapi webhook] token inválido para canal", channelId);
+          return new Response("unauthorized", { status: 401 });
+        }
+
         const event: string = payload?.event ?? payload?.type ?? "";
         const eventLower = event.toLowerCase();
 
@@ -84,6 +97,13 @@ async function ingestMessage(sb: any, channelId: string, m: any) {
   if (!phone) return;
   if (remoteJid?.includes("@g.us")) return; // ignora grupos por enquanto
 
+  // Deduplicação: se já ingerimos essa mensagem, pula
+  if (externalId) {
+    const { data: dup } = await sb
+      .from("messages").select("id").eq("external_id", externalId).maybeSingle();
+    if (dup) return;
+  }
+
   const content = extractText(m);
   if (!content && !m?.mediaUrl) return;
 
@@ -122,7 +142,7 @@ async function ingestMessage(sb: any, channelId: string, m: any) {
     conversationId = newConv.id;
   }
 
-  await sb.from("messages").insert({
+  const { error: insertErr } = await sb.from("messages").insert({
     conversation_id: conversationId,
     direction: fromMe ? "outbound" : "inbound",
     type: "text",
@@ -131,6 +151,9 @@ async function ingestMessage(sb: any, channelId: string, m: any) {
     status: "delivered",
     metadata: { raw: m },
   });
+  // 23505 = unique_violation → mensagem já ingerida em corrida concorrente
+  if (insertErr && (insertErr as any).code !== "23505") throw insertErr;
+  if (insertErr) return;
 
   await sb.from("conversations").update({
     last_message_at: new Date().toISOString(),

@@ -221,6 +221,7 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
   .inputValidator(z.object({
     conversationId: z.string().uuid(),
     text: z.string().min(1),
+    replyToMessageId: z.string().uuid().optional(),
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -236,9 +237,11 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     const token = ((conv as any).channels?.credentials as any)?.token;
     if (!token) throw new Error("Canal sem token uazapi");
 
+    const reply = await resolveReply(supabaseAdmin, data.replyToMessageId);
+
     const res = await uazapiFetch("/send/text", {
       token,
-      body: { number: phone, text: data.text },
+      body: { number: phone, text: data.text, replyid: reply?.shortId },
     });
     const externalId: string | null =
       res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
@@ -251,7 +254,7 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
       content: data.text,
       status: "sent",
       external_id: externalId,
-      metadata: { uazapi: res },
+      metadata: { uazapi: res, ...(reply ? { replyTo: reply.preview } : {}) },
     });
     if (insErr && (insErr as any).code !== "23505") throw insErr;
 
@@ -264,6 +267,31 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     return { ok: true, id: externalId };
   });
 
+// helper: resolve reply target -> short uazapi id + preview
+async function resolveReply(sb: any, replyToMessageId?: string) {
+  if (!replyToMessageId) return null;
+  const { data: m } = await sb.from("messages")
+    .select("id, external_id, content, type, metadata")
+    .eq("id", replyToMessageId).maybeSingle();
+  if (!m) return null;
+  const shortId = extractShortId(m.external_id, m.metadata);
+  return {
+    shortId,
+    preview: {
+      messageId: m.id,
+      shortId,
+      content: (m.content ?? "").slice(0, 200),
+      type: m.type,
+    },
+  };
+}
+
+function extractShortId(externalId: string | null, metadata: any): string | undefined {
+  const raw = metadata?.raw ?? {};
+  return raw?.messageid ?? raw?.messageId ??
+    (externalId?.includes(":") ? externalId.split(":").pop()! : externalId ?? undefined);
+}
+
 // ---------- send media ----------
 // Recebe um path do bucket "attachments" (privado), gera signed URL e envia
 // via uazapi /send/media. Persiste a mensagem outbound com metadata do arquivo.
@@ -275,6 +303,7 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
     filename: z.string().min(1),
     mimeType: z.string().min(1),
     caption: z.string().optional(),
+    replyToMessageId: z.string().uuid().optional(),
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -290,7 +319,6 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
     const token = ((conv as any).channels?.credentials as any)?.token;
     if (!token) throw new Error("Canal sem token uazapi");
 
-    // Signed URL válida por 1h — tempo suficiente pra uazapi baixar o arquivo
     const { data: signed, error: signErr } = await supabaseAdmin
       .storage.from("attachments")
       .createSignedUrl(data.storagePath, 60 * 60);
@@ -303,6 +331,8 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
       mime.startsWith("audio/") ? "audio" :
       "document";
 
+    const reply = await resolveReply(supabaseAdmin, data.replyToMessageId);
+
     const res = await uazapiFetch("/send/media", {
       token,
       body: {
@@ -311,6 +341,7 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
         file: signed.signedUrl,
         docName: kind === "document" ? data.filename : undefined,
         text: data.caption ?? "",
+        replyid: reply?.shortId,
       },
     });
     const externalId: string | null =
@@ -329,6 +360,7 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
       metadata: {
         uazapi: res,
         media: { storagePath: data.storagePath, filename: data.filename, mimeType: mime },
+        ...(reply ? { replyTo: reply.preview } : {}),
       },
     });
     if (insErr && (insErr as any).code !== "23505") throw insErr;
@@ -337,6 +369,158 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
       assigned_agent_id: conv.assigned_agent_id ?? context.userId,
       last_message_at: new Date().toISOString(),
       last_message_preview: contentPreview.slice(0, 120),
+    }).eq("id", conv.id);
+
+    return { ok: true, id: externalId };
+  });
+
+// ---------- delete message ----------
+// Apaga a mensagem: se outbound, chama /message/delete na uazapi (apaga pra todos).
+// Marca metadata.deleted=true e substitui content.
+export const deleteUazapiMessage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ messageId: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: msg, error } = await supabaseAdmin
+      .from("messages")
+      .select("id, direction, external_id, metadata, conversation_id, conversations(channels(credentials), contacts(phone))")
+      .eq("id", data.messageId).single();
+    if (error || !msg) throw new Error("Mensagem não encontrada");
+
+    if (msg.direction === "outbound") {
+      const token = ((msg as any).conversations?.channels?.credentials as any)?.token;
+      const shortId = extractShortId(msg.external_id, msg.metadata);
+      if (token && shortId) {
+        try {
+          await uazapiFetch("/message/delete", { token, body: { id: shortId } });
+        } catch (e) {
+          console.warn("[uazapi delete] falhou:", (e as Error).message);
+        }
+      }
+    }
+
+    const meta = (msg.metadata as any) ?? {};
+    await supabaseAdmin.from("messages").update({
+      content: "🗑️ Mensagem apagada",
+      metadata: { ...meta, deleted: true },
+    }).eq("id", msg.id);
+
+    return { ok: true };
+  });
+
+// ---------- forward message ----------
+// Encaminha uma mensagem existente pra outra conversa (mesmo canal ou não).
+// Reenvia como texto ou como mídia (baixando do storage/uazapi conforme o caso).
+export const forwardUazapiMessage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    messageId: z.string().uuid(),
+    targetConversationId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: msg, error: msgErr } = await supabaseAdmin
+      .from("messages")
+      .select("id, type, content, external_id, metadata")
+      .eq("id", data.messageId).single();
+    if (msgErr || !msg) throw new Error("Mensagem não encontrada");
+
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from("conversations")
+      .select("id, assigned_agent_id, contacts(phone), channels(credentials)")
+      .eq("id", data.targetConversationId).single();
+    if (convErr || !conv) throw new Error("Conversa destino não encontrada");
+
+    const phone = (conv as any).contacts?.phone as string | null;
+    if (!phone) throw new Error("Contato destino sem telefone");
+    const token = ((conv as any).channels?.credentials as any)?.token;
+    if (!token) throw new Error("Canal destino sem token uazapi");
+
+    const isMedia = ["image", "video", "audio", "document"].includes(msg.type);
+    const meta: any = msg.metadata ?? {};
+    let externalId: string | null = null;
+    let previewContent = msg.content ?? "";
+
+    if (isMedia) {
+      // 1) tenta URL pública que a uazapi cacheou; 2) URL assinada do bucket;
+      // 3) força um download via getMessageMedia lógica → cachedUrl
+      let fileUrl: string | undefined = meta?.media?.cachedUrl;
+      if (!fileUrl && meta?.media?.storagePath) {
+        const { data: s } = await supabaseAdmin.storage
+          .from("attachments").createSignedUrl(meta.media.storagePath, 60 * 60);
+        fileUrl = s?.signedUrl;
+      }
+      if (!fileUrl) {
+        // último recurso: /message/download
+        const shortId = extractShortId(msg.external_id, meta);
+        if (shortId) {
+          try {
+            const dl: any = await uazapiFetch("/message/download", { token, body: { id: shortId } });
+            fileUrl = dl?.fileURL ?? dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
+          } catch { /* fallthrough */ }
+        }
+      }
+      if (!fileUrl) throw new Error("Arquivo original indisponível para encaminhar");
+
+      const mimeType = meta?.media?.mimeType ?? meta?.media?.mimetype ?? "application/octet-stream";
+      const filename = meta?.media?.filename ?? "arquivo";
+      const kind =
+        msg.type === "image" ? "image" :
+        msg.type === "video" ? "video" :
+        msg.type === "audio" ? "audio" : "document";
+
+      const res = await uazapiFetch("/send/media", {
+        token,
+        body: {
+          number: phone, type: kind, file: fileUrl,
+          docName: kind === "document" ? filename : undefined,
+          text: "",
+        },
+      });
+      externalId = res?.messageid ?? res?.id ?? null;
+      previewContent = previewContent || `[${kind}] ${filename}`;
+
+      await supabaseAdmin.from("messages").insert({
+        conversation_id: conv.id,
+        sender_agent_id: context.userId,
+        direction: "outbound",
+        type: kind,
+        content: previewContent,
+        status: "sent",
+        external_id: externalId,
+        metadata: {
+          uazapi: res,
+          media: { cachedUrl: fileUrl, mimeType, filename },
+          forwarded: true,
+        },
+      });
+    } else {
+      const text = (msg.content ?? "").trim();
+      if (!text) throw new Error("Mensagem vazia");
+      const res = await uazapiFetch("/send/text", {
+        token, body: { number: phone, text },
+      });
+      externalId = res?.messageid ?? res?.id ?? null;
+      previewContent = text;
+
+      await supabaseAdmin.from("messages").insert({
+        conversation_id: conv.id,
+        sender_agent_id: context.userId,
+        direction: "outbound",
+        type: "text",
+        content: text,
+        status: "sent",
+        external_id: externalId,
+        metadata: { uazapi: res, forwarded: true },
+      });
+    }
+
+    await supabaseAdmin.from("conversations").update({
+      assigned_agent_id: conv.assigned_agent_id ?? context.userId,
+      last_message_at: new Date().toISOString(),
+      last_message_preview: previewContent.slice(0, 120),
     }).eq("id", conv.id);
 
     return { ok: true, id: externalId };
@@ -464,7 +648,11 @@ export const getMessageMedia = createServerFn({ method: "POST" })
     const media = meta.media ?? {};
     const raw = meta.raw ?? {};
 
-    // 1) já temos arquivo no bucket
+    // 1a) URL já cacheada pela uazapi
+    if (media.cachedUrl) {
+      return { url: media.cachedUrl, mimeType: media.mimeType ?? media.mimetype ?? null, filename: media.filename ?? null };
+    }
+    // 1b) já temos arquivo no bucket
     if (media.storagePath) {
       const { data: s, error } = await supabaseAdmin.storage
         .from("attachments").createSignedUrl(media.storagePath, 60 * 60);
@@ -494,7 +682,8 @@ export const getMessageMedia = createServerFn({ method: "POST" })
         for (const body of [{ id }, { messageid: id }, { messageId: id }]) {
           try {
             const r = await uazapiFetch(path, { token, body });
-            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media || r.url || r.mediaUrl || r.fileUrl)) {
+            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media ||
+                      r.fileURL || r.url || r.mediaUrl || r.fileUrl)) {
               dl = r; break outer;
             }
           } catch (e) { lastErr = (e as Error).message; }
@@ -511,11 +700,20 @@ export const getMessageMedia = createServerFn({ method: "POST" })
     const filename: string | undefined =
       dl?.fileName ?? dl?.filename ?? media.filename ?? raw?.content?.fileName;
 
-    if (!b64) {
-      const url: string | undefined = dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
-      if (url) return { url, mimeType: mimetype, filename: filename ?? null };
-      throw new Error("uazapi não retornou o arquivo");
+    // uazapi cacheia o arquivo e devolve URL pública própria — usa direto,
+    // sem re-upload pro Storage (mais rápido e evita cota).
+    const directUrl: string | undefined =
+      dl?.fileURL ?? dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
+    if (directUrl) {
+      // guarda no metadata pra próximas visualizações não baterem na uazapi
+      await supabaseAdmin.from("messages").update({
+        metadata: { ...meta, media: { ...media, cachedUrl: directUrl, mimeType: mimetype, filename: filename ?? media.filename } },
+      }).eq("id", msg.id);
+      return { url: directUrl, mimeType: mimetype, filename: filename ?? null };
     }
+
+    if (!b64) throw new Error("uazapi não retornou o arquivo");
+
 
     const clean = b64.includes(",") ? b64.split(",", 2)[1] : b64;
     const bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));

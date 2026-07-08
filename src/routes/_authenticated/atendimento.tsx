@@ -4,14 +4,27 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
-import { sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia } from "@/lib/uazapi.functions";
+import {
+  sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia,
+  deleteUazapiMessage, forwardUazapiMessage,
+} from "@/lib/uazapi.functions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle, Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud, Loader2 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle,
+  Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud, Loader2,
+  MoreVertical, Reply, Forward, Trash2, X,
+} from "lucide-react";
 import { toast } from "sonner";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
 import { formatDistanceToNow, format } from "date-fns";
@@ -45,7 +58,10 @@ type Message = {
   content: string | null;
   status: string;
   created_at: string;
+  metadata?: any;
 };
+
+type ReplyDraft = { id: string; content: string; type: string; direction: string };
 
 const channelIcon = (type: string) => {
   if (type === "instagram") return <Instagram className="w-3 h-3" />;
@@ -222,6 +238,8 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [reply, setReply] = useState<ReplyDraft | null>(null);
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -246,9 +264,9 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const sendFn = useServerFn(sendUazapiMessage);
   const sendMutation = useMutation({
     mutationFn: (content: string) =>
-      sendFn({ data: { conversationId: conversation.id, text: content } }),
+      sendFn({ data: { conversationId: conversation.id, text: content, replyToMessageId: reply?.id } }),
     onSuccess: () => {
-      setText("");
+      setText(""); setReply(null);
       qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
@@ -272,11 +290,12 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
           filename: file.name,
           mimeType: file.type || "application/octet-stream",
           caption: text.trim() || undefined,
+          replyToMessageId: reply?.id,
         },
       });
     },
     onSuccess: () => {
-      setText("");
+      setText(""); setReply(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
@@ -285,6 +304,17 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
       toast.error(e?.message ?? "Falha ao enviar arquivo");
       if (fileInputRef.current) fileInputRef.current.value = "";
     },
+  });
+
+  const deleteFn = useServerFn(deleteUazapiMessage);
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { messageId: id } }),
+    onSuccess: () => {
+      toast.success("Mensagem apagada");
+      qc.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao apagar"),
   });
 
   const handleSend = (e: React.FormEvent) => {
@@ -298,6 +328,14 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     const f = e.target.files?.[0];
     if (!f) return;
     mediaMutation.mutate(f);
+  };
+
+  const messagePreview = (m: Message) => {
+    if (m.type === "image") return "📷 Imagem";
+    if (m.type === "video") return "🎥 Vídeo";
+    if (m.type === "audio") return "🎵 Áudio";
+    if (m.type === "document") return `📄 ${m.metadata?.media?.filename || "Documento"}`;
+    return m.content ?? "";
   };
 
   return (
@@ -323,32 +361,83 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
             Sem mensagens ainda. Envie a primeira!
           </div>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className={`flex ${m.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[65%] px-3 py-2 rounded-lg text-sm shadow-sm ${
-                m.direction === "outbound"
-                  ? "bg-[var(--chat-bubble-out)] text-foreground rounded-tr-none"
-                  : "bg-[var(--chat-bubble-in)] text-foreground rounded-tl-none"
-              }`}
-            >
-              {["image", "video", "audio", "document"].includes(m.type) ? (
-                <MediaBubble message={m} />
-              ) : (
-                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+        {messages.map((m) => {
+          const isOut = m.direction === "outbound";
+          const deleted = m.metadata?.deleted;
+          const replyTo = m.metadata?.replyTo;
+          return (
+            <div key={m.id} className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
+              {isOut && (
+                <MessageActions
+                  message={m}
+                  onReply={() => setReply({ id: m.id, content: messagePreview(m), type: m.type, direction: m.direction })}
+                  onForward={() => setForwardMsg(m)}
+                  onDelete={() => deleteMutation.mutate(m.id)}
+                  disabled={deleted}
+                />
               )}
-              <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 justify-end">
-                {format(new Date(m.created_at), "HH:mm")}
-                {m.direction === "outbound" && (
-                  m.status === "read" ? <CheckCheck className="w-3 h-3 text-primary" /> :
-                  m.status === "delivered" ? <CheckCheck className="w-3 h-3" /> :
-                  <Check className="w-3 h-3" />
+              <div
+                className={`max-w-[65%] px-3 py-2 rounded-lg text-sm shadow-sm ${
+                  isOut
+                    ? "bg-[var(--chat-bubble-out)] text-foreground rounded-tr-none"
+                    : "bg-[var(--chat-bubble-in)] text-foreground rounded-tl-none"
+                } ${deleted ? "italic opacity-70" : ""}`}
+              >
+                {replyTo && (
+                  <div className="mb-1.5 border-l-2 border-primary/60 pl-2 py-1 bg-black/5 dark:bg-white/5 rounded text-xs">
+                    <div className="font-medium text-primary/90">Resposta</div>
+                    <div className="text-muted-foreground truncate max-w-[280px]">{replyTo.content}</div>
+                  </div>
                 )}
+                {m.metadata?.forwarded && (
+                  <div className="text-[10px] text-muted-foreground italic flex items-center gap-1 mb-1">
+                    <Forward className="w-3 h-3" /> Encaminhada
+                  </div>
+                )}
+                {deleted ? (
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                ) : ["image", "video", "audio", "document"].includes(m.type) ? (
+                  <MediaBubble message={m} />
+                ) : (
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                )}
+                <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 justify-end">
+                  {format(new Date(m.created_at), "HH:mm")}
+                  {isOut && !deleted && (
+                    m.status === "read" ? <CheckCheck className="w-3 h-3 text-primary" /> :
+                    m.status === "delivered" ? <CheckCheck className="w-3 h-3" /> :
+                    <Check className="w-3 h-3" />
+                  )}
+                </div>
               </div>
+              {!isOut && (
+                <MessageActions
+                  message={m}
+                  onReply={() => setReply({ id: m.id, content: messagePreview(m), type: m.type, direction: m.direction })}
+                  onForward={() => setForwardMsg(m)}
+                  onDelete={() => deleteMutation.mutate(m.id)}
+                  disabled={deleted}
+                />
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {reply && (
+        <div className="bg-[var(--chat-panel)] border-t border-border px-4 py-2 flex items-center gap-3">
+          <div className="w-1 h-10 rounded bg-primary" />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium text-primary">
+              Respondendo {reply.direction === "outbound" ? "à sua mensagem" : "ao contato"}
+            </div>
+            <div className="text-xs text-muted-foreground truncate">{reply.content}</div>
+          </div>
+          <Button type="button" variant="ghost" size="icon" onClick={() => setReply(null)} title="Cancelar resposta">
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      )}
 
       <form onSubmit={handleSend} className="bg-[var(--chat-panel)] px-4 py-3 flex items-center gap-2 border-t border-border">
         <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
@@ -361,9 +450,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
             <EmojiPicker
               theme={Theme.AUTO}
               emojiStyle={EmojiStyle.NATIVE}
-              onEmojiClick={(e) => {
-                setText((prev) => prev + e.emoji);
-              }}
+              onEmojiClick={(e) => setText((prev) => prev + e.emoji)}
               searchPlaceholder="Buscar emoji..."
               width={320}
               height={380}
@@ -394,16 +481,153 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Digite uma mensagem"
+          placeholder={reply ? "Responder..." : "Digite uma mensagem"}
           className="bg-input border-0 flex-1"
         />
         <Button type="submit" size="icon" disabled={!text.trim() || sendMutation.isPending}>
           <Send className="w-4 h-4" />
         </Button>
       </form>
+
+      <ForwardDialog
+        message={forwardMsg}
+        currentConversationId={conversation.id}
+        onClose={() => setForwardMsg(null)}
+      />
     </div>
   );
 }
+
+function MessageActions({
+  message, onReply, onForward, onDelete, disabled,
+}: {
+  message: Message;
+  onReply: () => void;
+  onForward: () => void;
+  onDelete: () => void;
+  disabled?: boolean;
+}) {
+  if (disabled) return <div className="w-7" />;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button" variant="ghost" size="icon"
+          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Ações"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={message.direction === "outbound" ? "end" : "start"}>
+        <DropdownMenuItem onClick={onReply}>
+          <Reply className="w-4 h-4 mr-2" /> Responder
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onForward}>
+          <Forward className="w-4 h-4 mr-2" /> Encaminhar
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
+          <Trash2 className="w-4 h-4 mr-2" /> Apagar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ForwardDialog({
+  message, currentConversationId, onClose,
+}: {
+  message: Message | null;
+  currentConversationId: string;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const qc = useQueryClient();
+  const forwardFn = useServerFn(forwardUazapiMessage);
+
+  const { data: convs = [] } = useQuery({
+    queryKey: ["forward-targets"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("conversations")
+        .select("id, contacts(name, phone), channels(name, type)")
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(200);
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!message,
+  });
+
+  const forwardMutation = useMutation({
+    mutationFn: (targetId: string) =>
+      forwardFn({ data: { messageId: message!.id, targetConversationId: targetId } }),
+    onSuccess: () => {
+      toast.success("Mensagem encaminhada");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao encaminhar"),
+  });
+
+  const filtered = convs.filter((c) => {
+    if (c.id === currentConversationId) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return c.contacts?.name?.toLowerCase().includes(q) ||
+      c.contacts?.phone?.includes(search);
+  });
+
+  return (
+    <Dialog open={!!message} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Encaminhar mensagem</DialogTitle>
+        </DialogHeader>
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Buscar contato..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <ScrollArea className="max-h-80">
+          {filtered.length === 0 ? (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              Nenhum contato encontrado.
+            </div>
+          ) : filtered.map((c) => (
+            <button
+              key={c.id}
+              disabled={forwardMutation.isPending}
+              onClick={() => forwardMutation.mutate(c.id)}
+              className="w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-accent rounded-md disabled:opacity-50"
+            >
+              <Avatar className="w-9 h-9">
+                <AvatarFallback className="bg-primary/20 text-primary">
+                  {c.contacts?.name?.[0]?.toUpperCase() ?? "?"}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{c.contacts?.name}</div>
+                <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                  {channelIcon(c.channels?.type)} {c.channels?.name}
+                </div>
+              </div>
+            </button>
+          ))}
+        </ScrollArea>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 
 function MediaBubble({ message }: { message: Message }) {
   const fn = useServerFn(getMessageMedia);

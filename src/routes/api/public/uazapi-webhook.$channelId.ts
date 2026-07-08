@@ -154,3 +154,53 @@ function extractMessages(payload: any): any[] {
   if (!messages.length && looksLikeMessage(payload)) return [payload];
   return messages;
 }
+
+function mapAckStatus(raw: any): "sent" | "delivered" | "read" | "failed" | null {
+  if (raw === null || raw === undefined) return null;
+  // Baileys/uazapi numeric ack: 0=pending 1=sent 2=delivered 3=read 4=played 5=error
+  if (typeof raw === "number") {
+    if (raw === 1) return "sent";
+    if (raw === 2) return "delivered";
+    if (raw >= 3 && raw <= 4) return "read";
+    if (raw === 5) return "failed";
+    return null;
+  }
+  const s = String(raw).toLowerCase();
+  if (s.includes("read") || s.includes("played")) return "read";
+  if (s.includes("deliver")) return "delivered";
+  if (s.includes("sent") || s === "server_ack") return "sent";
+  if (s.includes("error") || s.includes("fail")) return "failed";
+  return null;
+}
+
+function extractStatusUpdates(payload: any): Array<{ externalId: string; status: any }> {
+  const buckets: any[] = [
+    ...toMessageArray(payload?.data?.updates),
+    ...toMessageArray(payload?.updates),
+    ...toMessageArray(payload?.data?.messages),
+    ...toMessageArray(payload?.data?.message),
+    ...toMessageArray(payload?.data),
+    ...toMessageArray(payload?.messages),
+    ...toMessageArray(payload?.message),
+    ...toMessageArray(payload?.event?.messages),
+    ...toMessageArray(payload?.event?.data),
+    payload,
+  ];
+  const out: Array<{ externalId: string; status: any }> = [];
+  const seen = new Set<string>();
+  for (const b of buckets) {
+    if (!b || typeof b !== "object") continue;
+    const id =
+      b?.key?.id ?? b?.messageid ?? b?.messageId ?? b?.id ??
+      b?.message?.key?.id ?? b?.update?.key?.id;
+    const status =
+      b?.status ?? b?.ack ?? b?.update?.status ?? b?.update?.ack ??
+      b?.receipt?.type ?? b?.messageStatus;
+    if (!id || status === undefined || status === null) continue;
+    const key = `${id}:${status}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ externalId: String(id), status });
+  }
+  return out;
+}

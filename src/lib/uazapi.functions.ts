@@ -449,6 +449,3 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
 
 // re-export para conveniência de consumidores que queiram tipar
 export { CHANNEL_PUBLIC_COLS };
-
-// re-export para conveniência de consumidores que queiram tipar
-export { CHANNEL_PUBLIC_COLS };

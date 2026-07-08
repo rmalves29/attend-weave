@@ -667,17 +667,20 @@ export const getMessageMedia = createServerFn({ method: "POST" })
   .inputValidator(z.object({ messageId: z.string().uuid() }))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { resolveMessageMediaToStorage, signMediaUrlPath } = await import("./uazapi-media.server");
+    const { resolveMessageMediaToStorage } = await import("./uazapi-media.server");
 
-    const { data: msg, error: msgErr } = await supabaseAdmin
-      .from("messages")
-      .select("id, metadata")
-      .eq("id", data.messageId).single();
-    if (msgErr || !msg) throw new Error("Mensagem não encontrada");
+    const media = await resolveMessageMediaToStorage(supabaseAdmin, data.messageId);
 
-    const media = await resolveMessageMediaToStorage(supabaseAdmin, msg.id);
+    // URL assinada direta do Storage (CDN Supabase) — sem passar pelo proxy TSS.
+    const { data: signed, error: signErr } = await supabaseAdmin.storage
+      .from("attachments")
+      .createSignedUrl(media.storagePath, 60 * 60);
+    if (signErr || !signed?.signedUrl) {
+      throw new Error(`Falha ao assinar URL: ${signErr?.message ?? "sem URL"}`);
+    }
+
     return {
-      url: signMediaUrlPath(msg.id),
+      url: signed.signedUrl,
       mimeType: media.mimeType,
       filename: media.filename,
     };

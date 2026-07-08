@@ -10,18 +10,74 @@ function extractPhone(jid?: string): string | null {
 function extractText(m: any): string {
   return (
     m?.text ??
+    m?.caption ??
     m?.message?.text ??
     m?.message?.conversation ??
     m?.message?.extendedTextMessage?.text ??
     m?.message?.textMessage?.text ??
+    m?.message?.imageMessage?.caption ??
+    m?.message?.videoMessage?.caption ??
+    m?.message?.documentMessage?.caption ??
     m?.msgContent?.conversation ??
     m?.msgContent?.extendedTextMessage?.text ??
+    m?.msgContent?.imageMessage?.caption ??
+    m?.msgContent?.videoMessage?.caption ??
+    m?.msgContent?.documentMessage?.caption ??
     m?.textMessage?.text ??
     m?.content?.text ??
     m?.body ??
-    m?.content ??
+    (typeof m?.content === "string" ? m.content : "") ??
     ""
   );
+}
+
+// Detecta se é mídia e retorna { type, url, mimetype, filename } quando possível.
+function extractMedia(m: any): {
+  type: "image" | "video" | "audio" | "document" | null;
+  url?: string;
+  mimetype?: string;
+  filename?: string;
+} {
+  const msg = m?.message ?? m?.msgContent ?? {};
+
+  const map: Record<string, "image" | "video" | "audio" | "document"> = {
+    imageMessage: "image",
+    videoMessage: "video",
+    audioMessage: "audio",
+    documentMessage: "document",
+    stickerMessage: "image",
+    ptvMessage: "video",
+  };
+  for (const [k, t] of Object.entries(map)) {
+    const node = msg?.[k];
+    if (node && typeof node === "object") {
+      return {
+        type: t,
+        url: node.url ?? node.directPath ?? node.mediaUrl,
+        mimetype: node.mimetype ?? node.mimeType,
+        filename: node.fileName ?? node.filename ?? node.title,
+      };
+    }
+  }
+
+  // Formato flat da uazapi (messageType + mediaUrl)
+  const flatType = (m?.messageType ?? m?.type ?? "").toString().toLowerCase();
+  const flatMap: Record<string, "image" | "video" | "audio" | "document"> = {
+    image: "image", imagemessage: "image", sticker: "image",
+    video: "video", videomessage: "video",
+    audio: "audio", audiomessage: "audio", ptt: "audio",
+    document: "document", documentmessage: "document", file: "document",
+  };
+  if (flatMap[flatType]) {
+    return {
+      type: flatMap[flatType],
+      url: m?.mediaUrl ?? m?.url ?? m?.file ?? m?.content?.url,
+      mimetype: m?.mimetype ?? m?.mimeType ?? m?.content?.mimetype,
+      filename: m?.fileName ?? m?.filename ?? m?.docName,
+    };
+  }
+
+  return { type: null };
 }
 
 export async function ingestMessage(sb: any, channelId: string, m: any) {
@@ -47,8 +103,21 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     if (dup) return;
   }
 
-  const content = extractText(m);
-  if (!content && !m?.mediaUrl) return;
+  const caption = extractText(m);
+  const media = extractMedia(m);
+  const isMedia = media.type !== null;
+
+  // Se não é mídia e não tem texto, ignora
+  if (!isMedia && !caption) return;
+
+  const msgType = isMedia ? media.type! : "text";
+  const previewLabel =
+    msgType === "image" ? "📷 Imagem" :
+    msgType === "video" ? "🎥 Vídeo" :
+    msgType === "audio" ? "🎵 Áudio" :
+    msgType === "document" ? `📄 ${media.filename || "Documento"}` :
+    "";
+  const content = caption || previewLabel || "[mídia]";
 
   // upsert contato (por telefone — sistema single-tenant)
   let contactId: string;
@@ -94,11 +163,14 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   const insertRow: any = {
     conversation_id: conversationId,
     direction: fromMe ? "outbound" : "inbound",
-    type: "text",
-    content: content || "[mídia]",
+    type: msgType,
+    content,
     external_id: externalId,
     status: "delivered",
-    metadata: { raw: m },
+    metadata: {
+      raw: m,
+      ...(isMedia ? { media: { url: media.url, mimetype: media.mimetype, filename: media.filename } } : {}),
+    },
   };
   if (createdAt) insertRow.created_at = createdAt;
 
@@ -108,7 +180,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
 
   await sb.from("conversations").update({
     last_message_at: createdAt ?? new Date().toISOString(),
-    last_message_preview: (content || "[mídia]").slice(0, 120),
+    last_message_preview: content.slice(0, 120),
     unread_count: fromMe ? unread : unread + 1,
   }).eq("id", conversationId);
 }

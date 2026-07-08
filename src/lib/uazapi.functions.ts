@@ -494,7 +494,8 @@ export const getMessageMedia = createServerFn({ method: "POST" })
         for (const body of [{ id }, { messageid: id }, { messageId: id }]) {
           try {
             const r = await uazapiFetch(path, { token, body });
-            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media || r.url || r.mediaUrl || r.fileUrl)) {
+            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media ||
+                      r.fileURL || r.url || r.mediaUrl || r.fileUrl)) {
               dl = r; break outer;
             }
           } catch (e) { lastErr = (e as Error).message; }
@@ -511,11 +512,20 @@ export const getMessageMedia = createServerFn({ method: "POST" })
     const filename: string | undefined =
       dl?.fileName ?? dl?.filename ?? media.filename ?? raw?.content?.fileName;
 
-    if (!b64) {
-      const url: string | undefined = dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
-      if (url) return { url, mimeType: mimetype, filename: filename ?? null };
-      throw new Error("uazapi não retornou o arquivo");
+    // uazapi cacheia o arquivo e devolve URL pública própria — usa direto,
+    // sem re-upload pro Storage (mais rápido e evita cota).
+    const directUrl: string | undefined =
+      dl?.fileURL ?? dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;
+    if (directUrl) {
+      // guarda no metadata pra próximas visualizações não baterem na uazapi
+      await supabaseAdmin.from("messages").update({
+        metadata: { ...meta, media: { ...media, cachedUrl: directUrl, mimeType: mimetype, filename: filename ?? media.filename } },
+      }).eq("id", msg.id);
+      return { url: directUrl, mimeType: mimetype, filename: filename ?? null };
     }
+
+    if (!b64) throw new Error("uazapi não retornou o arquivo");
+
 
     const clean = b64.includes(",") ? b64.split(",", 2)[1] : b64;
     const bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));

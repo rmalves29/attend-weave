@@ -107,16 +107,29 @@ function AtendimentoPage() {
         <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-lg">Conversas</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={handleRefresh}
-            title="Atualizar"
-            className="h-8 w-8"
-          >
-            <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              title="Sincronizar histórico da uazapi"
+              className="h-8 w-8"
+            >
+              <DownloadCloud className={`w-4 h-4 ${syncMutation.isPending ? "animate-pulse" : ""}`} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              title="Atualizar"
+              className="h-8 w-8"
+            >
+              <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
         <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />

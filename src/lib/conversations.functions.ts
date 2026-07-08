@@ -99,6 +99,83 @@ export const updateConversationTags = createServerFn({ method: "POST" })
     return { ok: true, tags };
   });
 
+// ============ TAGS PRÉ-DEFINIDAS ============
+// Aplicar tag: adiciona o nome ao array da conversa, muda o status se a tag
+// define um, e agenda o follow-up automático se habilitado.
+export const applyConversationTag = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    tagId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin, isAdmin } = await assertAgentOrAdmin(context.userId);
+    const conv = await loadConversationForAction(supabaseAdmin, data.conversationId, context.userId, isAdmin);
+
+    const { data: tag, error: tagErr } = await supabaseAdmin
+      .from("tags").select("*").eq("id", data.tagId).single();
+    if (tagErr || !tag) throw new Error("Etiqueta não encontrada");
+
+    const tags: string[] = Array.from(new Set([...(conv.tags ?? []), tag.name]));
+    const patch: any = { tags };
+    if (tag.sets_status) {
+      patch.status = tag.sets_status;
+      if (tag.sets_status === "resolved" || tag.sets_status === "closed") patch.unread_count = 0;
+    }
+    if (!conv.assigned_agent_id) patch.assigned_agent_id = context.userId;
+
+    const { error } = await supabaseAdmin
+      .from("conversations").update(patch).eq("id", data.conversationId);
+    if (error) throw new Error(error.message);
+
+    // agenda follow-up (cancela pendentes anteriores da mesma tag antes)
+    if (tag.auto_message_enabled && tag.auto_message_content?.trim()) {
+      await supabaseAdmin.from("tag_followups")
+        .update({ status: "cancelled" })
+        .eq("conversation_id", data.conversationId)
+        .eq("tag_id", tag.id)
+        .eq("status", "pending");
+      const sendAt = new Date(Date.now() + (tag.auto_message_hours ?? 24) * 60 * 60 * 1000);
+      const { error: fuErr } = await supabaseAdmin.from("tag_followups").insert({
+        conversation_id: data.conversationId,
+        tag_id: tag.id,
+        send_at: sendAt.toISOString(),
+      });
+      if (fuErr) throw new Error(fuErr.message);
+    }
+
+    return { ok: true, tags, status: patch.status ?? conv.status };
+  });
+
+// Remover tag: tira do array e cancela follow-ups pendentes dela.
+export const removeConversationTag = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    tagId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin, isAdmin } = await assertAgentOrAdmin(context.userId);
+    const conv = await loadConversationForAction(supabaseAdmin, data.conversationId, context.userId, isAdmin);
+
+    const { data: tag, error: tagErr } = await supabaseAdmin
+      .from("tags").select("id, name").eq("id", data.tagId).single();
+    if (tagErr || !tag) throw new Error("Etiqueta não encontrada");
+
+    const tags = (conv.tags ?? []).filter((t: string) => t !== tag.name);
+    const { error } = await supabaseAdmin
+      .from("conversations").update({ tags }).eq("id", data.conversationId);
+    if (error) throw new Error(error.message);
+
+    await supabaseAdmin.from("tag_followups")
+      .update({ status: "cancelled" })
+      .eq("conversation_id", data.conversationId)
+      .eq("tag_id", tag.id)
+      .eq("status", "pending");
+
+    return { ok: true, tags };
+  });
+
 // Nota interna: mensagem que NUNCA vai pro WhatsApp — só a equipe vê.
 // mentions: ids de auth.users citados com @nome no texto (validados como
 // agent/admin antes de virarem notificação real-time no client).

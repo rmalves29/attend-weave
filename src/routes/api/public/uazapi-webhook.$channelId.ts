@@ -28,6 +28,15 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           return new Response("unauthorized", { status: 401 });
         }
 
+        // Carona no tráfego de webhooks pra despachar follow-ups vencidos
+        // (mensagens automáticas agendadas pelas tags — ex: aguardando 24h).
+        try {
+          const { processDueFollowups } = await import("@/lib/followups.server");
+          await processDueFollowups(supabaseAdmin, 3);
+        } catch (e) {
+          console.error("[uazapi webhook] followups err:", (e as Error).message);
+        }
+
         const eventLower = extractEventName(payload).toLowerCase();
 
         // Eventos de conexão

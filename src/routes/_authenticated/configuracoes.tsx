@@ -11,10 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Zap, Trash2, Plus, Users, UserPlus } from "lucide-react";
+import { Zap, Trash2, Plus, Users, UserPlus, Tag, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
@@ -60,6 +61,9 @@ function ConfigPage() {
           <TabsTrigger value="quick-replies" className="gap-2">
             <Zap className="w-4 h-4" /> Respostas rápidas
           </TabsTrigger>
+          <TabsTrigger value="tags" className="gap-2">
+            <Tag className="w-4 h-4" /> Etiquetas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
@@ -68,6 +72,10 @@ function ConfigPage() {
 
         <TabsContent value="quick-replies" className="mt-4">
           <QuickRepliesCard />
+        </TabsContent>
+
+        <TabsContent value="tags" className="mt-4">
+          <TagsManagementCard />
         </TabsContent>
       </Tabs>
     </div>
@@ -182,6 +190,166 @@ function UsersSection({ currentUserId }: { currentUserId: string }) {
         </div>
       </Card>
     </>
+  );
+}
+
+const TAG_STATUS_OPTIONS = [
+  { value: "none", label: "Não muda o status" },
+  { value: "open", label: "Aberta" },
+  { value: "pending", label: "Aguardando" },
+  { value: "resolved", label: "Finalizada" },
+  { value: "closed", label: "Fechada" },
+];
+
+function TagsManagementCard() {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [setsStatus, setSetsStatus] = useState("none");
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoHours, setAutoHours] = useState(24);
+  const [autoContent, setAutoContent] = useState("");
+
+  const { data: tags = [] } = useQuery({
+    queryKey: ["tags"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tags" as any)
+        .select("id, name, sets_status, auto_message_enabled, auto_message_hours, auto_message_content")
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as unknown as {
+        id: string; name: string; sets_status: string | null;
+        auto_message_enabled: boolean; auto_message_hours: number; auto_message_content: string | null;
+      }[];
+    },
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const n = name.trim().toLowerCase();
+      if (!n) throw new Error("Dê um nome à etiqueta");
+      if (autoEnabled && !autoContent.trim()) throw new Error("Escreva a mensagem automática");
+      const { error } = await supabase.from("tags" as any).insert({
+        name: n,
+        sets_status: setsStatus === "none" ? null : setsStatus,
+        auto_message_enabled: autoEnabled,
+        auto_message_hours: Math.min(720, Math.max(1, autoHours || 24)),
+        auto_message_content: autoEnabled ? autoContent.trim() : null,
+      });
+      if (error) throw new Error(error.code === "23505" ? `A etiqueta "${n}" já existe` : error.message);
+    },
+    onSuccess: () => {
+      setName(""); setSetsStatus("none"); setAutoEnabled(false); setAutoHours(24); setAutoContent("");
+      toast.success("Etiqueta criada");
+      qc.invalidateQueries({ queryKey: ["tags"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao criar etiqueta"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("tags" as any).delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Etiqueta removida");
+      qc.invalidateQueries({ queryKey: ["tags"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao remover"),
+  });
+
+  const statusLabel = (v: string | null) =>
+    TAG_STATUS_OPTIONS.find((o) => o.value === (v ?? "none"))?.label ?? v;
+
+  return (
+    <Card className="p-5 mt-6">
+      <h2 className="font-semibold mb-1 flex items-center gap-2">
+        <Tag className="w-4 h-4 text-primary" /> Etiquetas
+      </h2>
+      <p className="text-xs text-muted-foreground mb-4">
+        As atendentes só podem usar etiquetas desta lista. Cada etiqueta pode mudar o status da conversa
+        e agendar uma mensagem automática pro cliente (cancelada se ele responder antes).
+      </p>
+
+      {/* Formulário de nova etiqueta */}
+      <div className="rounded-lg border p-3 mb-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Nome da etiqueta (ex: aguardando)" maxLength={40} />
+          <Select value={setsStatus} onValueChange={setSetsStatus}>
+            <SelectTrigger><SelectValue placeholder="Muda o status?" /></SelectTrigger>
+            <SelectContent>
+              {TAG_STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
+          <div className="text-sm flex items-center gap-2">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            Enviar mensagem automática se o cliente não responder
+          </div>
+          <Switch checked={autoEnabled} onCheckedChange={setAutoEnabled} />
+        </div>
+
+        {autoEnabled && (
+          <div className="space-y-2 pl-1">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Enviar após</span>
+              <Input type="number" min={1} max={720} value={autoHours}
+                onChange={(e) => setAutoHours(Number(e.target.value))}
+                className="w-20 h-8" />
+              <span className="text-muted-foreground">horas sem resposta</span>
+            </div>
+            <Textarea
+              value={autoContent}
+              onChange={(e) => setAutoContent(e.target.value)}
+              placeholder={"Mensagem que o cliente vai receber.\nEx: Oi! Passando para saber se você ainda precisa de ajuda 😊"}
+              rows={3}
+            />
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button type="button" onClick={() => addMutation.mutate()}
+            disabled={addMutation.isPending || !name.trim()}>
+            <Plus className="w-4 h-4 mr-1" /> Criar etiqueta
+          </Button>
+        </div>
+      </div>
+
+      {/* Lista */}
+      <div className="space-y-2">
+        {tags.length === 0 && (
+          <div className="text-sm text-muted-foreground py-4 text-center">Nenhuma etiqueta cadastrada.</div>
+        )}
+        {tags.map((t) => (
+          <div key={t.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-accent group">
+            <Badge variant="secondary" className="shrink-0">{t.name}</Badge>
+            <div className="flex-1 text-xs text-muted-foreground space-y-0.5">
+              <div>Status: {statusLabel(t.sets_status)}</div>
+              {t.auto_message_enabled && (
+                <div className="flex items-start gap-1">
+                  <Clock className="w-3 h-3 mt-0.5 shrink-0" />
+                  <span>Em {t.auto_message_hours}h: “{t.auto_message_content}”</span>
+                </div>
+              )}
+            </div>
+            <Button
+              type="button" variant="ghost" size="icon"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
+              onClick={() => deleteMutation.mutate(t.id)}
+              disabled={deleteMutation.isPending}
+              title="Remover etiqueta"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

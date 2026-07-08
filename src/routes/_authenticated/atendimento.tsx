@@ -10,7 +10,8 @@ import {
   deleteUazapiMessage, forwardUazapiMessage,
 } from "@/lib/uazapi.functions";
 import {
-  transferConversation, setConversationStatus, updateConversationTags, addInternalNote,
+  transferConversation, setConversationStatus, addInternalNote,
+  applyConversationTag, removeConversationTag,
 } from "@/lib/conversations.functions";
 import {
   scheduleMessage, listScheduledMessages, cancelScheduledMessage,
@@ -1096,64 +1097,114 @@ function MediaBubble({ message }: { message: Message }) {
   );
 }
 
+type TagDef = {
+  id: string;
+  name: string;
+  sets_status: string | null;
+  auto_message_enabled: boolean;
+  auto_message_hours: number;
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  open: "Aberta", pending: "Aguardando", resolved: "Finalizada", closed: "Fechada",
+};
+
 function TagsEditor({ conversation }: { conversation: Conversation }) {
   const qc = useQueryClient();
-  const [newTag, setNewTag] = useState("");
-  const tagsFn = useServerFn(updateConversationTags);
+  const applyFn = useServerFn(applyConversationTag);
+  const removeFn = useServerFn(removeConversationTag);
 
-  const tagsMutation = useMutation({
-    mutationFn: (tags: string[]) =>
-      tagsFn({ data: { conversationId: conversation.id, tags } }),
-    onSuccess: () => {
-      setNewTag("");
-      qc.invalidateQueries({ queryKey: ["conversations"] });
+  // Etiquetas pré-definidas (cadastro em Configurações)
+  const { data: allTags = [] } = useQuery({
+    queryKey: ["tags"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tags" as any)
+        .select("id, name, sets_status, auto_message_enabled, auto_message_hours")
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as unknown as TagDef[];
     },
-    onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar tags"),
+    staleTime: 60_000,
   });
 
-  const tags = conversation.tags ?? [];
-  const addTag = () => {
-    const t = newTag.trim().toLowerCase();
-    if (!t || tags.includes(t)) { setNewTag(""); return; }
-    tagsMutation.mutate([...tags, t]);
-  };
-  const removeTag = (t: string) => tagsMutation.mutate(tags.filter((x) => x !== t));
+  const applyMutation = useMutation({
+    mutationFn: (tagId: string) =>
+      applyFn({ data: { conversationId: conversation.id, tagId } }),
+    onSuccess: (_r, tagId) => {
+      const tag = allTags.find((t) => t.id === tagId);
+      if (tag?.sets_status) toast.success(`Etiqueta aplicada — conversa marcada como ${STATUS_LABEL[tag.sets_status] ?? tag.sets_status}`);
+      else toast.success("Etiqueta aplicada");
+      if (tag?.auto_message_enabled) toast.info(`Mensagem automática agendada para daqui a ${tag.auto_message_hours}h (cancela se o cliente responder)`);
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao aplicar etiqueta"),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (tagId: string) =>
+      removeFn({ data: { conversationId: conversation.id, tagId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao remover etiqueta"),
+  });
+
+  const applied = conversation.tags ?? [];
+  const available = allTags.filter((t) => !applied.includes(t.name));
+  const byName = (name: string) => allTags.find((t) => t.name === name);
 
   return (
     <div>
       <div className="flex items-center gap-2 text-muted-foreground mb-2">
-        <Tag className="w-4 h-4" /> Tags
+        <Tag className="w-4 h-4" /> Etiquetas
       </div>
       <div className="flex flex-wrap gap-1 mb-2">
-        {tags.length ? tags.map((t) => (
-          <Badge key={t} variant="secondary" className="gap-1 pr-1">
-            {t}
-            <button
-              type="button"
-              onClick={() => removeTag(t)}
-              disabled={tagsMutation.isPending}
-              className="hover:text-destructive"
-              title={`Remover tag ${t}`}
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </Badge>
-        )) : <span className="text-xs text-muted-foreground">Sem tags</span>}
+        {applied.length ? applied.map((name) => {
+          const tag = byName(name);
+          return (
+            <Badge key={name} variant="secondary" className="gap-1 pr-1">
+              {name}
+              {tag && (
+                <button
+                  type="button"
+                  onClick={() => removeMutation.mutate(tag.id)}
+                  disabled={removeMutation.isPending}
+                  className="hover:text-destructive"
+                  title={`Remover etiqueta ${name}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </Badge>
+          );
+        }) : <span className="text-xs text-muted-foreground">Sem etiquetas</span>}
       </div>
-      <div className="flex gap-1">
-        <Input
-          value={newTag}
-          onChange={(e) => setNewTag(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
-          placeholder="Nova tag..."
-          className="h-8 text-xs"
-          maxLength={40}
-        />
-        <Button type="button" size="icon" variant="outline" className="h-8 w-8 shrink-0"
-          disabled={!newTag.trim() || tagsMutation.isPending} onClick={addTag} title="Adicionar tag">
-          <Plus className="w-4 h-4" />
-        </Button>
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" size="sm" variant="outline" className="h-8 text-xs w-full"
+            disabled={applyMutation.isPending || available.length === 0}>
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            {available.length === 0 ? "Todas aplicadas" : "Adicionar etiqueta"}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          {available.map((t) => (
+            <DropdownMenuItem key={t.id} onClick={() => applyMutation.mutate(t.id)}>
+              <div className="flex flex-col gap-0.5">
+                <span className="font-medium">{t.name}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {t.sets_status ? `muda status → ${STATUS_LABEL[t.sets_status] ?? t.sets_status}` : "não muda status"}
+                  {t.auto_message_enabled ? ` · msg automática em ${t.auto_message_hours}h` : ""}
+                </span>
+              </div>
+            </DropdownMenuItem>
+          ))}
+          {allTags.length === 0 && (
+            <div className="px-2 py-2 text-xs text-muted-foreground">
+              Nenhuma etiqueta cadastrada — crie em Configurações.
+            </div>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

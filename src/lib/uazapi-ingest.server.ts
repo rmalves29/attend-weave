@@ -186,6 +186,15 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     }
   }
 
+  // Cliente respondeu → cancela follow-ups automáticos pendentes da conversa
+  // (a mensagem de "ainda precisa de ajuda?" não faz sentido se ela já falou).
+  if (!fromMe) {
+    await sb.from("tag_followups")
+      .update({ status: "cancelled" })
+      .eq("conversation_id", conversationId)
+      .eq("status", "pending");
+  }
+
   const createdAt = timestamp
     ? new Date((timestamp > 1e12 ? timestamp : timestamp * 1000)).toISOString()
     : undefined;

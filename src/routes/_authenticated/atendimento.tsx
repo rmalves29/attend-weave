@@ -91,8 +91,20 @@ function AtendimentoPage() {
       {/* Coluna 1: lista de conversas */}
       <div className="w-80 border-r border-border bg-sidebar flex flex-col">
         <div className="p-3 border-b border-border">
-          <h2 className="font-semibold text-lg mb-3">Conversas</h2>
-          <div className="relative">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-lg">Conversas</h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleRefresh}
+            title="Atualizar"
+            className="h-8 w-8"
+          >
+            <RefreshCw className={`w-4 h-4 ${isFetchingConvs ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+        <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Pesquisar..."

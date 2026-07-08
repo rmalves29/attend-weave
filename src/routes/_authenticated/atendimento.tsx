@@ -8,6 +8,9 @@ import {
   sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia,
   deleteUazapiMessage, forwardUazapiMessage,
 } from "@/lib/uazapi.functions";
+import {
+  transferConversation, setConversationStatus, updateConversationTags, addInternalNote,
+} from "@/lib/conversations.functions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,7 +26,8 @@ import {
 import {
   Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle,
   Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud, Loader2,
-  MoreVertical, Reply, Forward, Trash2, X,
+  MoreVertical, Reply, Forward, Trash2, X, StickyNote, ArrowRightLeft,
+  CheckCircle2, RotateCcw, Zap, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
@@ -59,7 +63,10 @@ type Message = {
   status: string;
   created_at: string;
   metadata?: any;
+  is_internal?: boolean;
 };
+
+type QuickReply = { id: string; shortcut: string; content: string };
 
 type ReplyDraft = { id: string; content: string; type: string; direction: string };
 
@@ -76,6 +83,13 @@ function AtendimentoPage() {
 
   const qc = useQueryClient();
   useRealtimeMessages(selectedId);
+
+  // Permissão de notificação desktop (uma vez)
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
 
   const { data: conversations = [], isFetching: isFetchingConvs, refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"],
@@ -240,8 +254,25 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [reply, setReply] = useState<ReplyDraft | null>(null);
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  const [noteMode, setNoteMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Respostas rápidas: digite /atalho para sugerir
+  const { data: quickReplies = [] } = useQuery({
+    queryKey: ["quick-replies"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("quick_replies" as any).select("id, shortcut, content").order("shortcut");
+      if (error) throw error;
+      return (data ?? []) as unknown as QuickReply[];
+    },
+    staleTime: 60_000,
+  });
+  const slashQuery = text.startsWith("/") ? text.slice(1).toLowerCase() : null;
+  const slashMatches = slashQuery !== null
+    ? quickReplies.filter((q) => q.shortcut.toLowerCase().startsWith(slashQuery)).slice(0, 6)
+    : [];
 
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", conversation.contact_id, conversation.channel_id],
@@ -326,11 +357,22 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
     onError: (e: any) => toast.error(e?.message ?? "Falha ao apagar"),
   });
 
+  const noteFn = useServerFn(addInternalNote);
+  const noteMutation = useMutation({
+    mutationFn: (content: string) => noteFn({ data: { conversationId: conversation.id, content } }),
+    onSuccess: () => {
+      setText("");
+      qc.invalidateQueries({ queryKey: ["messages"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar nota"),
+  });
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
-    sendMutation.mutate(t);
+    if (noteMode) noteMutation.mutate(t);
+    else sendMutation.mutate(t);
   };
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -362,6 +404,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
           </div>
         </div>
         <Badge variant="outline" className="capitalize">{conversation.status}</Badge>
+        <ConversationActions conversation={conversation} />
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
@@ -374,6 +417,21 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
           const isOut = m.direction === "outbound";
           const deleted = m.metadata?.deleted;
           const replyTo = m.metadata?.replyTo;
+          if (m.is_internal) {
+            return (
+              <div key={m.id} className="flex justify-center">
+                <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
+                  <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
+                    <StickyNote className="w-3 h-3" /> Nota interna
+                  </div>
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  <div className="text-[10px] opacity-60 mt-1 text-right">
+                    {format(new Date(m.created_at), "HH:mm")}
+                  </div>
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={m.id} className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
               {isOut && (
@@ -448,7 +506,42 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         </div>
       )}
 
+      {slashMatches.length > 0 && (
+        <div className="bg-[var(--chat-panel)] border-t border-border px-4 py-2 space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+            <Zap className="w-3 h-3" /> Respostas rápidas
+          </div>
+          {slashMatches.map((q) => (
+            <button
+              key={q.id}
+              type="button"
+              onClick={() => setText(q.content)}
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-accent text-sm flex gap-2 items-baseline"
+            >
+              <span className="text-primary font-mono text-xs shrink-0">/{q.shortcut}</span>
+              <span className="text-muted-foreground truncate">{q.content}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {noteMode && (
+        <div className="bg-amber-100 dark:bg-amber-950/40 border-t border-amber-300 dark:border-amber-800 px-4 py-1.5 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+          <StickyNote className="w-3.5 h-3.5" /> Modo nota interna — o cliente NÃO recebe esta mensagem
+        </div>
+      )}
+
       <form onSubmit={handleSend} className="bg-[var(--chat-panel)] px-4 py-3 flex items-center gap-2 border-t border-border">
+        <Button
+          type="button"
+          variant={noteMode ? "default" : "ghost"}
+          size="icon"
+          title={noteMode ? "Voltar para mensagem normal" : "Nota interna (só a equipe vê)"}
+          onClick={() => setNoteMode((v) => !v)}
+          className={noteMode ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}
+        >
+          <StickyNote className="w-5 h-5" />
+        </Button>
         <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
           <PopoverTrigger asChild>
             <Button type="button" variant="ghost" size="icon" title="Emojis">
@@ -490,10 +583,10 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={reply ? "Responder..." : "Digite uma mensagem"}
+          placeholder={noteMode ? "Escrever nota interna..." : reply ? "Responder..." : "Digite uma mensagem (/ para respostas rápidas)"}
           className="bg-input border-0 flex-1"
         />
-        <Button type="submit" size="icon" disabled={!text.trim() || sendMutation.isPending}>
+        <Button type="submit" size="icon" disabled={!text.trim() || sendMutation.isPending || noteMutation.isPending}>
           <Send className="w-4 h-4" />
         </Button>
       </form>
@@ -503,6 +596,85 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         currentConversationId={conversation.id}
         onClose={() => setForwardMsg(null)}
       />
+    </div>
+  );
+}
+
+function ConversationActions({ conversation }: { conversation: Conversation }) {
+  const qc = useQueryClient();
+  const transferFn = useServerFn(transferConversation);
+  const statusFn = useServerFn(setConversationStatus);
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, name").order("name");
+      if (error) throw error;
+      return (data ?? []) as { id: string; name: string }[];
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: (toAgentId: string) =>
+      transferFn({ data: { conversationId: conversation.id, toAgentId } }),
+    onSuccess: () => {
+      toast.success("Conversa transferida");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao transferir"),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: (status: "open" | "resolved") =>
+      statusFn({ data: { conversationId: conversation.id, status } }),
+    onSuccess: (_r, status) => {
+      toast.success(status === "resolved" ? "Conversa resolvida" : "Conversa reaberta");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao mudar status"),
+  });
+
+  const isResolved = conversation.status === "resolved" || conversation.status === "closed";
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        title={isResolved ? "Reabrir conversa" : "Marcar como resolvida"}
+        disabled={statusMutation.isPending}
+        onClick={() => statusMutation.mutate(isResolved ? "open" : "resolved")}
+      >
+        {isResolved ? <RotateCcw className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" title="Transferir conversa">
+            <ArrowRightLeft className="w-5 h-5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">Transferir para</div>
+          <DropdownMenuSeparator />
+          {agents.length === 0 && (
+            <div className="px-2 py-2 text-xs text-muted-foreground">Nenhum atendente</div>
+          )}
+          {agents.map((a) => (
+            <DropdownMenuItem
+              key={a.id}
+              disabled={transferMutation.isPending || a.id === conversation.assigned_agent_id}
+              onClick={() => transferMutation.mutate(a.id)}
+            >
+              {a.name}
+              {a.id === conversation.assigned_agent_id && (
+                <span className="ml-auto text-[10px] text-muted-foreground">atual</span>
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -698,6 +870,68 @@ function MediaBubble({ message }: { message: Message }) {
   );
 }
 
+function TagsEditor({ conversation }: { conversation: Conversation }) {
+  const qc = useQueryClient();
+  const [newTag, setNewTag] = useState("");
+  const tagsFn = useServerFn(updateConversationTags);
+
+  const tagsMutation = useMutation({
+    mutationFn: (tags: string[]) =>
+      tagsFn({ data: { conversationId: conversation.id, tags } }),
+    onSuccess: () => {
+      setNewTag("");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar tags"),
+  });
+
+  const tags = conversation.tags ?? [];
+  const addTag = () => {
+    const t = newTag.trim().toLowerCase();
+    if (!t || tags.includes(t)) { setNewTag(""); return; }
+    tagsMutation.mutate([...tags, t]);
+  };
+  const removeTag = (t: string) => tagsMutation.mutate(tags.filter((x) => x !== t));
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-muted-foreground mb-2">
+        <Tag className="w-4 h-4" /> Tags
+      </div>
+      <div className="flex flex-wrap gap-1 mb-2">
+        {tags.length ? tags.map((t) => (
+          <Badge key={t} variant="secondary" className="gap-1 pr-1">
+            {t}
+            <button
+              type="button"
+              onClick={() => removeTag(t)}
+              disabled={tagsMutation.isPending}
+              className="hover:text-destructive"
+              title={`Remover tag ${t}`}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </Badge>
+        )) : <span className="text-xs text-muted-foreground">Sem tags</span>}
+      </div>
+      <div className="flex gap-1">
+        <Input
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
+          placeholder="Nova tag..."
+          className="h-8 text-xs"
+          maxLength={40}
+        />
+        <Button type="button" size="icon" variant="outline" className="h-8 w-8 shrink-0"
+          disabled={!newTag.trim() || tagsMutation.isPending} onClick={addTag} title="Adicionar tag">
+          <Plus className="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ContactPanel({ conversation }: { conversation: Conversation }) {
   const c = conversation.contacts;
   return (
@@ -727,16 +961,7 @@ function ContactPanel({ conversation }: { conversation: Conversation }) {
             <span className="truncate">{c.email}</span>
           </div>
         )}
-        <div>
-          <div className="flex items-center gap-2 text-muted-foreground mb-2">
-            <Tag className="w-4 h-4" /> Tags
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {conversation.tags?.length ? conversation.tags.map((t) => (
-              <Badge key={t} variant="secondary">{t}</Badge>
-            )) : <span className="text-xs text-muted-foreground">Sem tags</span>}
-          </div>
-        </div>
+        <TagsEditor conversation={conversation} />
         {conversation.last_message_at && (
           <div className="text-xs text-muted-foreground pt-4 border-t border-border">
             Última mensagem: {formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })}

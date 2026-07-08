@@ -52,6 +52,27 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           return new Response("ok");
         }
 
+        // ACK / status updates (messages_update, message_ack, receipt)
+        if (
+          eventLower.includes("messages_update") ||
+          eventLower.includes("message_update") ||
+          eventLower.includes("ack") ||
+          eventLower.includes("receipt")
+        ) {
+          const updates = extractStatusUpdates(payload);
+          for (const u of updates) {
+            try {
+              const mapped = mapAckStatus(u.status);
+              if (!mapped || !u.externalId) continue;
+              await supabaseAdmin
+                .from("messages")
+                .update({ status: mapped })
+                .eq("external_id", u.externalId);
+            } catch (e) { console.error("[uazapi webhook] ack err:", e); }
+          }
+          return new Response("ok");
+        }
+
         // Mensagens
         const { ingestMessage } = await import("@/lib/uazapi-ingest.server");
         const messages = extractMessages(payload);

@@ -20,18 +20,30 @@ function getUazapiConfig() {
 
 async function uazapiFetch(
   path: string,
-  opts: { token?: string; admin?: boolean; method?: string; body?: unknown } = {},
+  opts: { token?: string; admin?: boolean; method?: string; body?: unknown; timeoutMs?: number } = {},
 ) {
   const { url, adminToken } = getUazapiConfig();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.admin) headers["admintoken"] = adminToken;
   if (opts.token) headers["token"] = opts.token;
 
-  const res = await fetch(`${url}${path}`, {
-    method: opts.method ?? (opts.body ? "POST" : "GET"),
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  // Sem timeout, uma chamada pendurada da uazapi congela a server fn inteira
+  // (sintoma: "Carregando mídia..." infinito no painel).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${url}${path}`, {
+      method: opts.method ?? (opts.body ? "POST" : "GET"),
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    throw new Error(e?.name === "AbortError" ? `uazapi: timeout em ${path}` : `uazapi: ${e?.message ?? e}`);
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await res.text();
   let data: any = text;
   try { data = text ? JSON.parse(text) : null; } catch { /* keep text */ }

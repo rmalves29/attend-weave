@@ -652,6 +652,11 @@ function MediaBubble({ message }: { message: Message }) {
     return (
       <div className="space-y-1">
         <div className="text-muted-foreground text-xs">{message.content ?? "Mídia indisponível"}</div>
+        {error ? (
+          <div className="text-destructive text-[11px] break-words max-w-xs">
+            {(error as Error)?.message ?? String(error)}
+          </div>
+        ) : null}
         <button type="button" onClick={() => refetch()} disabled={isFetching}
           className="text-xs underline text-primary">
           {isFetching ? "Tentando..." : "Tentar novamente"}

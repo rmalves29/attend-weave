@@ -120,7 +120,9 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     "";
   const content = caption || previewLabel || "[mídia]";
 
-  // upsert contato (por telefone — sistema single-tenant)
+  // Contato único por telefone (índice contacts_phone_unique).
+  // Em caso de race entre webhooks paralelos, o INSERT perde pro índice
+  // único (23505) e re-busca o vencedor.
   // IMPORTANTE: pushName em mensagens outbound (fromMe) é o dono da conta,
   // não o cliente. Só usamos pushName quando a mensagem é inbound.
   const contactName = !fromMe && pushName ? pushName : null;
@@ -141,27 +143,47 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
         source_channel_id: channelId,
         external_id: remoteJid,
       }).select("id").single();
-    if (error) throw error;
-    contactId = created.id;
+    if (error && (error as any).code === "23505") {
+      const { data: winner } = await sb
+        .from("contacts").select("id").eq("phone", phone).single();
+      contactId = winner.id;
+    } else if (error) {
+      throw error;
+    } else {
+      contactId = created.id;
+    }
   }
 
-  // conversa aberta para o par (contato + canal)
+  // Modelo WhatsApp: UMA conversa por (contato + canal), pra sempre.
+  // Mensagem nova em conversa resolvida REABRE a mesma conversa
+  // (em vez de criar outra — que era o que duplicava as janelas).
   let conversationId: string;
   let unread = 0;
-  const { data: openConv } = await sb.from("conversations")
-    .select("id, unread_count")
+  const { data: conv } = await sb.from("conversations")
+    .select("id, unread_count, status")
     .eq("contact_id", contactId).eq("channel_id", channelId)
-    .neq("status", "resolved")
-    .order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (openConv) {
-    conversationId = openConv.id;
-    unread = openConv.unread_count ?? 0;
+    .order("created_at", { ascending: true }).limit(1).maybeSingle();
+  if (conv) {
+    conversationId = conv.id;
+    unread = conv.unread_count ?? 0;
+    if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
+      await sb.from("conversations").update({ status: "open" }).eq("id", conv.id);
+    }
   } else {
     const { data: newConv, error } = await sb.from("conversations")
       .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
       .select("id").single();
-    if (error) throw error;
-    conversationId = newConv.id;
+    if (error && (error as any).code === "23505") {
+      const { data: winner } = await sb.from("conversations")
+        .select("id, unread_count")
+        .eq("contact_id", contactId).eq("channel_id", channelId).single();
+      conversationId = winner.id;
+      unread = winner.unread_count ?? 0;
+    } else if (error) {
+      throw error;
+    } else {
+      conversationId = newConv.id;
+    }
   }
 
   const createdAt = timestamp

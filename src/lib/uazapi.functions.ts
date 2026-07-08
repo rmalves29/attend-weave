@@ -462,7 +462,9 @@ export const getMessageMedia = createServerFn({ method: "POST" })
 
     const meta: any = msg.metadata ?? {};
     const media = meta.media ?? {};
+    const raw = meta.raw ?? {};
 
+    // 1) já temos arquivo no bucket
     if (media.storagePath) {
       const { data: s, error } = await supabaseAdmin.storage
         .from("attachments").createSignedUrl(media.storagePath, 60 * 60);
@@ -472,23 +474,42 @@ export const getMessageMedia = createServerFn({ method: "POST" })
 
     const token = ((msg as any).conversations?.channels?.credentials as any)?.token;
     if (!token) throw new Error("Canal sem token");
-    if (!msg.external_id) throw new Error("Mensagem sem external_id — sincronize novamente");
 
+    // ids possíveis pra baixar (uazapi aceita várias formas)
+    const candidateIds: string[] = [];
+    const push = (v: unknown) => { if (typeof v === "string" && v && !candidateIds.includes(v)) candidateIds.push(v); };
+    push(raw?.messageid);
+    push(raw?.messageId);
+    push(raw?.id);
+    push(msg.external_id);
+    if (msg.external_id?.includes(":")) push(msg.external_id.split(":").pop()!);
+    if (!candidateIds.length) throw new Error("Mensagem sem id da uazapi");
+
+    // tenta várias combinações de endpoint × payload
     let dl: any = null;
+    let lastErr = "";
+    outer:
     for (const path of ["/message/download", "/message/downloadmedia"]) {
-      try {
-        dl = await uazapiFetch(path, { token, body: { id: msg.external_id } });
-        if (dl) break;
-      } catch { /* try next */ }
+      for (const id of candidateIds) {
+        for (const body of [{ id }, { messageid: id }, { messageId: id }]) {
+          try {
+            const r = await uazapiFetch(path, { token, body });
+            if (r && (r.fileBase64 || r.base64 || r.data || r.file || r.media || r.url || r.mediaUrl || r.fileUrl)) {
+              dl = r; break outer;
+            }
+          } catch (e) { lastErr = (e as Error).message; }
+        }
+      }
     }
-    if (!dl) throw new Error("Falha ao baixar mídia da uazapi");
+    if (!dl) throw new Error(`Falha ao baixar mídia da uazapi${lastErr ? `: ${lastErr}` : ""}`);
 
     const b64: string | undefined =
       dl?.fileBase64 ?? dl?.base64 ?? dl?.data ?? dl?.file ?? dl?.media;
     const mimetype: string =
-      dl?.mimetype ?? dl?.mimeType ?? media.mimetype ?? media.mimeType ?? "application/octet-stream";
+      dl?.mimetype ?? dl?.mimeType ?? media.mimetype ?? media.mimeType ??
+      raw?.content?.mimetype ?? "application/octet-stream";
     const filename: string | undefined =
-      dl?.fileName ?? dl?.filename ?? media.filename;
+      dl?.fileName ?? dl?.filename ?? media.filename ?? raw?.content?.fileName;
 
     if (!b64) {
       const url: string | undefined = dl?.url ?? dl?.mediaUrl ?? dl?.fileUrl;

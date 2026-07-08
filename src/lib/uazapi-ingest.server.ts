@@ -60,20 +60,21 @@ function extractMedia(m: any): {
     }
   }
 
-  // Formato flat da uazapi (messageType + mediaUrl)
-  const flatType = (m?.messageType ?? m?.type ?? "").toString().toLowerCase();
+  // Formato flat da uazapi (messageType + content.*)
+  const flatType = (m?.messageType ?? m?.mediaType ?? m?.type ?? "").toString().toLowerCase();
   const flatMap: Record<string, "image" | "video" | "audio" | "document"> = {
-    image: "image", imagemessage: "image", sticker: "image",
-    video: "video", videomessage: "video",
-    audio: "audio", audiomessage: "audio", ptt: "audio",
+    image: "image", imagemessage: "image", sticker: "image", stickermessage: "image",
+    video: "video", videomessage: "video", ptv: "video", ptvmessage: "video",
+    audio: "audio", audiomessage: "audio", ptt: "audio", pttmessage: "audio",
     document: "document", documentmessage: "document", file: "document",
   };
+  const content = m?.content ?? {};
   if (flatMap[flatType]) {
     return {
       type: flatMap[flatType],
-      url: m?.mediaUrl ?? m?.url ?? m?.file ?? m?.content?.url,
-      mimetype: m?.mimetype ?? m?.mimeType ?? m?.content?.mimetype,
-      filename: m?.fileName ?? m?.filename ?? m?.docName,
+      url: content.url ?? content.URL ?? content.directPath ?? m?.mediaUrl ?? m?.url ?? m?.file,
+      mimetype: content.mimetype ?? content.mimeType ?? m?.mimetype ?? m?.mimeType,
+      filename: content.fileName ?? content.filename ?? content.title ?? m?.fileName ?? m?.filename ?? m?.docName,
     };
   }
 

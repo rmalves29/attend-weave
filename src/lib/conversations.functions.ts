@@ -117,7 +117,7 @@ export const addInternalNote = createServerFn({ method: "POST" })
       content: data.content,
       status: "sent",
       is_internal: true,
-    });
+    } as any);
     if (error) throw new Error(error.message);
     // não atualiza preview/last_message_at — nota não é mensagem pro cliente
     return { ok: true };

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
-import { sendUazapiMessage, sendUazapiMedia, syncUazapiHistory } from "@/lib/uazapi.functions";
+import { sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia } from "@/lib/uazapi.functions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -332,7 +332,11 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
                   : "bg-[var(--chat-bubble-in)] text-foreground rounded-tl-none"
               }`}
             >
-              <div className="whitespace-pre-wrap break-words">{m.content}</div>
+              {["image", "video", "audio", "document"].includes(m.type) ? (
+                <MediaBubble message={m} />
+              ) : (
+                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+              )}
               <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 justify-end">
                 {format(new Date(m.created_at), "HH:mm")}
                 {m.direction === "outbound" && (

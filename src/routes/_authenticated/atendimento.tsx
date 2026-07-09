@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
+import { usePresence } from "@/hooks/usePresence";
 import {
   sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia,
   deleteUazapiMessage, forwardUazapiMessage,
@@ -11,6 +12,9 @@ import {
 import {
   transferConversation, setConversationStatus, updateConversationTags, addInternalNote,
 } from "@/lib/conversations.functions";
+import {
+  scheduleMessage, listScheduledMessages, cancelScheduledMessage,
+} from "@/lib/scheduled-messages.functions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -27,7 +31,7 @@ import {
   Search, Send, Smile, Paperclip, Phone, Mail, Tag, MessageCircle,
   Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud, Loader2,
   MoreVertical, Reply, Forward, Trash2, X, StickyNote, ArrowRightLeft,
-  CheckCircle2, RotateCcw, Zap, Plus,
+  CheckCircle2, RotateCcw, Zap, Plus, Clock, CalendarClock, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
@@ -70,6 +74,16 @@ type QuickReply = { id: string; shortcut: string; content: string };
 
 type ReplyDraft = { id: string; content: string; type: string; direction: string };
 
+function renderWithMentions(content: string | null) {
+  if (!content) return content;
+  const parts = content.split(/(@[\p{L}0-9._-]+(?:\s[\p{L}0-9._-]+)?)/gu);
+  return parts.map((part, i) =>
+    part.startsWith("@")
+      ? <span key={i} className="font-semibold text-primary">{part}</span>
+      : <span key={i}>{part}</span>
+  );
+}
+
 const channelIcon = (type: string) => {
   if (type === "instagram") return <Instagram className="w-3 h-3" />;
   if (type === "facebook") return <Facebook className="w-3 h-3" />;
@@ -82,7 +96,20 @@ function AtendimentoPage() {
   const [filter, setFilter] = useState<"all" | "open" | "pending" | "resolved">("all");
 
   const qc = useQueryClient();
-  useRealtimeMessages(selectedId);
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) return null;
+      const { data: profile } = await supabase
+        .from("profiles").select("id, name").eq("id", data.user.id).maybeSingle();
+      return { id: data.user.id, name: profile?.name ?? data.user.email ?? "Atendente" };
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  useRealtimeMessages(selectedId, me?.id);
 
   // Permissão de notificação desktop (uma vez)
   useEffect(() => {
@@ -231,7 +258,7 @@ function AtendimentoPage() {
 
       {/* Coluna 2: chat */}
       {selected ? (
-        <ChatWindow conversation={selected} />
+        <ChatWindow conversation={selected} me={me ?? null} />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--chat-bg)] text-muted-foreground">
           <div className="text-center max-w-md p-6">
@@ -248,15 +275,19 @@ function AtendimentoPage() {
   );
 }
 
-function ChatWindow({ conversation }: { conversation: Conversation }) {
+function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id: string; name: string } | null }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [reply, setReply] = useState<ReplyDraft | null>(null);
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
   const [noteMode, setNoteMode] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [mentionIds, setMentionIds] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const viewers = usePresence(conversation.id, me?.id, me?.name);
 
   // Respostas rápidas: digite /atalho para sugerir
   const { data: quickReplies = [] } = useQuery({
@@ -273,6 +304,28 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
   const slashMatches = slashQuery !== null
     ? quickReplies.filter((q) => q.shortcut.toLowerCase().startsWith(slashQuery)).slice(0, 6)
     : [];
+
+  // Menções @agente no modo nota interna
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, name").order("name");
+      if (error) throw error;
+      return (data ?? []) as { id: string; name: string }[];
+    },
+    staleTime: 5 * 60_000,
+  });
+  const mentionMatch = noteMode ? /@([\p{L}0-9._-]*)$/u.exec(text) : null;
+  const mentionQuery = mentionMatch?.[1]?.toLowerCase() ?? null;
+  const mentionMatches = mentionQuery !== null
+    ? agents.filter((a) => a.name.toLowerCase().includes(mentionQuery)).slice(0, 6)
+    : [];
+  const pickMention = (agent: { id: string; name: string }) => {
+    if (!mentionMatch) return;
+    const start = text.length - mentionMatch[0].length;
+    setText(text.slice(0, start) + `@${agent.name} ` + text.slice(text.length));
+    setMentionIds((prev) => Array.from(new Set([...prev, agent.id])));
+  };
 
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", conversation.contact_id, conversation.channel_id],
@@ -359,9 +412,11 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
 
   const noteFn = useServerFn(addInternalNote);
   const noteMutation = useMutation({
-    mutationFn: (content: string) => noteFn({ data: { conversationId: conversation.id, content } }),
+    mutationFn: (content: string) =>
+      noteFn({ data: { conversationId: conversation.id, content, mentions: mentionIds } }),
     onSuccess: () => {
       setText("");
+      setMentionIds([]);
       qc.invalidateQueries({ queryKey: ["messages"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar nota"),
@@ -403,6 +458,15 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
             {channelIcon(conversation.channels?.type)} {conversation.channels?.name}
           </div>
         </div>
+        {viewers.length > 0 && (
+          <div
+            className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full"
+            title={`Também vendo esta conversa: ${viewers.map((v) => v.name).join(", ")}`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            {viewers.length === 1 ? viewers[0].name : `${viewers.length} atendentes`}
+          </div>
+        )}
         <Badge variant="outline" className="capitalize">{conversation.status}</Badge>
         <ConversationActions conversation={conversation} />
       </header>
@@ -424,7 +488,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
                   <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
                     <StickyNote className="w-3 h-3" /> Nota interna
                   </div>
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  <div className="whitespace-pre-wrap break-words">{renderWithMentions(m.content)}</div>
                   <div className="text-[10px] opacity-60 mt-1 text-right">
                     {format(new Date(m.created_at), "HH:mm")}
                   </div>
@@ -506,6 +570,24 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         </div>
       )}
 
+      {mentionMatches.length > 0 && (
+        <div className="bg-[var(--chat-panel)] border-t border-border px-4 py-2 space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+            @ Mencionar atendente
+          </div>
+          {mentionMatches.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => pickMention(a)}
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-accent text-sm"
+            >
+              {a.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {slashMatches.length > 0 && (
         <div className="bg-[var(--chat-panel)] border-t border-border px-4 py-2 space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
@@ -537,7 +619,7 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
           variant={noteMode ? "default" : "ghost"}
           size="icon"
           title={noteMode ? "Voltar para mensagem normal" : "Nota interna (só a equipe vê)"}
-          onClick={() => setNoteMode((v) => !v)}
+          onClick={() => { setNoteMode((v) => !v); setMentionIds([]); }}
           className={noteMode ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}
         >
           <StickyNote className="w-5 h-5" />
@@ -579,6 +661,16 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
             ? <Loader2 className="w-5 h-5 animate-spin" />
             : <Paperclip className="w-5 h-5" />}
         </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          title="Agendar mensagem"
+          disabled={noteMode}
+          onClick={() => setScheduleOpen(true)}
+        >
+          <Clock className="w-5 h-5" />
+        </Button>
 
         <Input
           value={text}
@@ -595,6 +687,14 @@ function ChatWindow({ conversation }: { conversation: Conversation }) {
         message={forwardMsg}
         currentConversationId={conversation.id}
         onClose={() => setForwardMsg(null)}
+      />
+
+      <ScheduleMessageDialog
+        open={scheduleOpen}
+        conversationId={conversation.id}
+        initialText={text}
+        onClose={() => setScheduleOpen(false)}
+        onScheduled={() => { setText(""); setScheduleOpen(false); }}
       />
     </div>
   );
@@ -810,6 +910,132 @@ function ForwardDialog({
 }
 
 
+function ScheduleMessageDialog({
+  open, conversationId, initialText, onClose, onScheduled,
+}: {
+  open: boolean;
+  conversationId: string;
+  initialText: string;
+  onClose: () => void;
+  onScheduled: () => void;
+}) {
+  const qc = useQueryClient();
+  const [content, setContent] = useState(initialText);
+  const [sendAt, setSendAt] = useState("");
+  const scheduleFn = useServerFn(scheduleMessage);
+
+  useEffect(() => {
+    if (open) setContent(initialText);
+  }, [open, initialText]);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const local = new Date(sendAt);
+      return scheduleFn({
+        data: { conversationId, content: content.trim(), sendAt: local.toISOString() },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Mensagem agendada");
+      qc.invalidateQueries({ queryKey: ["scheduled-messages", conversationId] });
+      setSendAt("");
+      onScheduled();
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao agendar"),
+  });
+
+  // valor mínimo aceito pelo <input datetime-local>: agora, no fuso local
+  const minLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 16);
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarClock className="w-5 h-5" /> Agendar mensagem
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Input
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Mensagem a ser enviada..."
+          />
+          <Input
+            type="datetime-local"
+            value={sendAt}
+            min={minLocal}
+            onChange={(e) => setSendAt(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button
+            disabled={!content.trim() || !sendAt || mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Agendar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ScheduledMessagesSection({ conversationId }: { conversationId: string }) {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listScheduledMessages);
+  const cancelFn = useServerFn(cancelScheduledMessage);
+
+  const { data: items = [] } = useQuery({
+    queryKey: ["scheduled-messages", conversationId],
+    queryFn: () => listFn({ data: { conversationId } }),
+    refetchInterval: 30_000,
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => cancelFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Agendamento cancelado");
+      qc.invalidateQueries({ queryKey: ["scheduled-messages", conversationId] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao cancelar"),
+  });
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="pt-4 border-t border-border">
+      <div className="flex items-center gap-2 text-muted-foreground mb-2">
+        <CalendarClock className="w-4 h-4" /> Mensagens agendadas
+      </div>
+      <div className="space-y-2">
+        {items.map((s) => (
+          <div key={s.id} className="flex items-start gap-2 bg-muted/50 rounded-md p-2 text-xs">
+            <div className="flex-1 min-w-0">
+              <div className="text-muted-foreground">
+                {format(new Date(s.send_at), "dd/MM HH:mm")}
+              </div>
+              <div className="truncate">{s.content}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => cancelMutation.mutate(s.id)}
+              disabled={cancelMutation.isPending}
+              className="text-muted-foreground hover:text-destructive shrink-0"
+              title="Cancelar agendamento"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MediaBubble({ message }: { message: Message }) {
   const fn = useServerFn(getMessageMedia);
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -962,6 +1188,7 @@ function ContactPanel({ conversation }: { conversation: Conversation }) {
           </div>
         )}
         <TagsEditor conversation={conversation} />
+        <ScheduledMessagesSection conversationId={conversation.id} />
         {conversation.last_message_at && (
           <div className="text-xs text-muted-foreground pt-4 border-t border-border">
             Última mensagem: {formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })}

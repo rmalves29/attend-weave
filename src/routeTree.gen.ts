@@ -16,6 +16,7 @@ import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authentic
 import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
 import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
 import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
+import { Route as ApiPublicDispatchScheduledMessagesRouteImport } from './routes/api/public/dispatch-scheduled-messages'
 import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
 import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
 
@@ -55,6 +56,12 @@ const AuthenticatedAtendimentoRoute =
     path: '/atendimento',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicDispatchScheduledMessagesRoute =
+  ApiPublicDispatchScheduledMessagesRouteImport.update({
+    id: '/api/public/dispatch-scheduled-messages',
+    path: '/api/public/dispatch-scheduled-messages',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicUazapiWebhookChannelIdRoute =
   ApiPublicUazapiWebhookChannelIdRouteImport.update({
     id: '/api/public/uazapi-webhook/$channelId',
@@ -75,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -85,6 +93,7 @@ export interface FileRoutesByTo {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -97,6 +106,7 @@ export interface FileRoutesById {
   '/_authenticated/canais': typeof AuthenticatedCanaisRoute
   '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesByTo: FileRoutesByTo
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   id:
@@ -130,6 +142,7 @@ export interface FileRouteTypes {
     | '/_authenticated/canais'
     | '/_authenticated/configuracoes'
     | '/_authenticated/relatorios'
+    | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesById: FileRoutesById
@@ -138,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicDispatchScheduledMessagesRoute: typeof ApiPublicDispatchScheduledMessagesRoute
   ApiPublicMessageMediaMessageIdRoute: typeof ApiPublicMessageMediaMessageIdRoute
   ApiPublicUazapiWebhookChannelIdRoute: typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -193,6 +207,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAtendimentoRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/dispatch-scheduled-messages': {
+      id: '/api/public/dispatch-scheduled-messages'
+      path: '/api/public/dispatch-scheduled-messages'
+      fullPath: '/api/public/dispatch-scheduled-messages'
+      preLoaderRoute: typeof ApiPublicDispatchScheduledMessagesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/uazapi-webhook/$channelId': {
       id: '/api/public/uazapi-webhook/$channelId'
       path: '/api/public/uazapi-webhook/$channelId'
@@ -231,9 +252,21 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicDispatchScheduledMessagesRoute:
+    ApiPublicDispatchScheduledMessagesRoute,
   ApiPublicMessageMediaMessageIdRoute: ApiPublicMessageMediaMessageIdRoute,
   ApiPublicUazapiWebhookChannelIdRoute: ApiPublicUazapiWebhookChannelIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

@@ -18,7 +18,7 @@ function getUazapiConfig() {
   return { url, adminToken };
 }
 
-async function uazapiFetch(
+export async function uazapiFetch(
   path: string,
   opts: { token?: string; admin?: boolean; method?: string; body?: unknown; timeoutMs?: number } = {},
 ) {
@@ -240,50 +240,19 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { sendTextViaUazapi } = await import("./uazapi-send.server");
 
-    const { data: conv, error: convErr } = await supabaseAdmin
-      .from("conversations")
-      .select("id, channel_id, contact_id, assigned_agent_id, unread_count, contacts(phone), channels(credentials)")
-      .eq("id", data.conversationId).single();
-    if (convErr || !conv) throw new Error("Conversa não encontrada");
-
-    const phone = (conv as any).contacts?.phone as string | null;
-    if (!phone) throw new Error("Contato sem telefone");
-    const token = ((conv as any).channels?.credentials as any)?.token;
-    if (!token) throw new Error("Canal sem token uazapi");
-
-    const reply = await resolveReply(supabaseAdmin, data.replyToMessageId);
-
-    const res = await uazapiFetch("/send/text", {
-      token,
-      body: { number: phone, text: data.text, replyid: reply?.shortId },
+    const result = await sendTextViaUazapi(supabaseAdmin, {
+      conversationId: data.conversationId,
+      text: data.text,
+      senderAgentId: context.userId,
+      replyToMessageId: data.replyToMessageId,
     });
-    const externalId: string | null =
-      res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
-
-    const { error: insErr } = await supabaseAdmin.from("messages").insert({
-      conversation_id: conv.id,
-      sender_agent_id: context.userId,
-      direction: "outbound",
-      type: "text",
-      content: data.text,
-      status: "sent",
-      external_id: externalId,
-      metadata: { uazapi: res, ...(reply ? { replyTo: reply.preview } : {}) },
-    });
-    if (insErr && (insErr as any).code !== "23505") throw insErr;
-
-    await supabaseAdmin.from("conversations").update({
-      assigned_agent_id: conv.assigned_agent_id ?? context.userId,
-      last_message_at: new Date().toISOString(),
-      last_message_preview: data.text.slice(0, 120),
-    }).eq("id", conv.id);
-
-    return { ok: true, id: externalId };
+    return { ok: true, id: result.externalId };
   });
 
 // helper: resolve reply target -> short uazapi id + preview
-async function resolveReply(sb: any, replyToMessageId?: string) {
+export async function resolveReply(sb: any, replyToMessageId?: string) {
   if (!replyToMessageId) return null;
   const { data: m } = await sb.from("messages")
     .select("id, external_id, content, type, metadata")

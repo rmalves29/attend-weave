@@ -20,6 +20,9 @@ Sistema de conversação entre atendentes e clientes. Base: TanStack Start + Sup
 - [x] **Tags editáveis**: adicionar/remover no painel do contato
 
 ## Fase 2 — Produtividade
+- [x] **Mensagens agendadas / follow-up** (implementado em 2026-07-09): botão 🕐 no composer agenda texto pra data/hora futura; tabela `scheduled_messages`, dispatcher em `/api/public/dispatch-scheduled-messages` chamado pelo pg_cron a cada minuto (ver migration `20260710090000_scheduled_messages.sql`). **Setup necessário antes de funcionar em produção:** habilitar extensões `pg_cron`/`pg_net` no projeto, configurar a env var `CRON_SECRET` na aplicação e rodar `ALTER DATABASE postgres SET app.settings.cron_secret = '<mesmo valor de CRON_SECRET>';` no SQL editor do Supabase.
+- [x] **Colisão de agentes**: indicador no header do chat mostrando outros atendentes vendo a mesma conversa agora (Supabase Realtime Presence, hook `usePresence`, sem tabela nova).
+- [x] **Menções @ em notas internas**: autocomplete de `@atendente` no modo nota; notifica (som + notificação desktop) quem foi mencionado via realtime.
 - [ ] Distribuição automática round-robin de conversas novas
 - [ ] Horário de atendimento + resposta automática fora do expediente
 - [ ] Filas/departamentos (vendas, pós-venda, troca)

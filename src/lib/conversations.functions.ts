@@ -100,14 +100,24 @@ export const updateConversationTags = createServerFn({ method: "POST" })
   });
 
 // Nota interna: mensagem que NUNCA vai pro WhatsApp — só a equipe vê.
+// mentions: ids de auth.users citados com @nome no texto (validados como
+// agent/admin antes de virarem notificação real-time no client).
 export const addInternalNote = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
     conversationId: z.string().uuid(),
     content: z.string().trim().min(1).max(2000),
+    mentions: z.array(z.string().uuid()).max(20).optional(),
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await assertAgentOrAdmin(context.userId);
+
+    let validMentions: string[] = [];
+    if (data.mentions?.length) {
+      const { data: roles } = await supabaseAdmin
+        .from("user_roles").select("user_id").in("user_id", data.mentions);
+      validMentions = Array.from(new Set((roles ?? []).map((r: any) => r.user_id)));
+    }
 
     const { error } = await supabaseAdmin.from("messages").insert({
       conversation_id: data.conversationId,
@@ -117,6 +127,7 @@ export const addInternalNote = createServerFn({ method: "POST" })
       content: data.content,
       status: "sent",
       is_internal: true,
+      metadata: validMentions.length ? { mentions: validMentions } : {},
     } as any);
     if (error) throw new Error(error.message);
     // não atualiza preview/last_message_at — nota não é mensagem pro cliente

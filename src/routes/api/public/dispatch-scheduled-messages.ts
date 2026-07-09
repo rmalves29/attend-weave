@@ -1,0 +1,68 @@
+// Dispatcher de mensagens agendadas (Fase 2 do roadmap).
+// Chamado pelo pg_cron (via pg_net, ver migration 20260710090000) a cada
+// minuto. Autenticado por secret compartilhado — não usa JWT de usuário
+// porque não há um usuário logado disparando a chamada.
+import { createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/api/public/dispatch-scheduled-messages")({
+  server: {
+    handlers: {
+      POST: async ({ request }) => {
+        const expected = process.env.CRON_SECRET;
+        if (!expected) {
+          console.error("[dispatch-scheduled] CRON_SECRET não configurado");
+          return new Response("not configured", { status: 500 });
+        }
+        const provided = request.headers.get("x-cron-secret");
+        if (provided !== expected) {
+          return new Response("unauthorized", { status: 401 });
+        }
+
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { sendTextViaUazapi } = await import("@/lib/uazapi-send.server");
+
+        const { data: due, error } = await supabaseAdmin
+          .from("scheduled_messages" as any)
+          .select("id, conversation_id, content, created_by")
+          .eq("status", "pending")
+          .lte("send_at", new Date().toISOString())
+          .limit(50);
+        if (error) {
+          console.error("[dispatch-scheduled] erro ao buscar pendentes:", error.message);
+          return new Response("db error", { status: 500 });
+        }
+
+        let sent = 0;
+        let failed = 0;
+        for (const item of (due ?? []) as any[]) {
+          try {
+            const result = await sendTextViaUazapi(supabaseAdmin, {
+              conversationId: item.conversation_id,
+              text: item.content,
+              senderAgentId: item.created_by,
+            });
+            await supabaseAdmin
+              .from("scheduled_messages" as any)
+              .update({ status: "sent", sent_message_id: result.messageId ?? null, error: null })
+              .eq("id", item.id);
+            sent++;
+          } catch (e) {
+            console.error("[dispatch-scheduled] falha ao enviar", item.id, (e as Error).message);
+            await supabaseAdmin
+              .from("scheduled_messages" as any)
+              .update({ status: "failed", error: (e as Error).message })
+              .eq("id", item.id);
+            failed++;
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ ok: true, sent, failed, checked: (due ?? []).length }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    },
+  },
+});

@@ -21,14 +21,14 @@ function playBeep() {
   } catch { /* áudio bloqueado até interação do usuário — ok */ }
 }
 
-function notifyInbound(content: string | null) {
+function notifyInbound(title: string, content: string | null, tag: string) {
   playBeep();
   // Notificação desktop só quando a aba não está em foco
   if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
     try {
-      new Notification("Nova mensagem — AttendFlow", {
+      new Notification(title, {
         body: (content ?? "Nova mensagem recebida").slice(0, 120),
-        tag: "attendflow-inbound",
+        tag,
       });
     } catch { /* ignore */ }
   }
@@ -37,9 +37,10 @@ function notifyInbound(content: string | null) {
 /**
  * Subscribes to realtime changes on messages + conversations and invalidates
  * the relevant TanStack Query caches so the chat updates automatically.
- * Também toca som/notificação desktop para mensagens novas do cliente.
+ * Também toca som/notificação desktop para mensagens novas do cliente e
+ * quando o usuário atual é @mencionado numa nota interna.
  */
-export function useRealtimeMessages(conversationId?: string | null) {
+export function useRealtimeMessages(conversationId?: string | null, currentUserId?: string) {
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -52,8 +53,20 @@ export function useRealtimeMessages(conversationId?: string | null) {
           const row: any = payload.new ?? payload.old ?? {};
           qc.invalidateQueries({ queryKey: ["messages"] });
           qc.invalidateQueries({ queryKey: ["conversations"] });
-          if (payload.eventType === "INSERT" && row.direction === "inbound" && !row.is_internal) {
-            notifyInbound(row.content);
+          if (payload.eventType !== "INSERT") return;
+
+          if (row.direction === "inbound" && !row.is_internal) {
+            notifyInbound("Nova mensagem — AttendFlow", row.content, "attendflow-inbound");
+            return;
+          }
+          const mentions: string[] = row.metadata?.mentions ?? [];
+          if (
+            row.is_internal &&
+            currentUserId &&
+            row.sender_agent_id !== currentUserId &&
+            mentions.includes(currentUserId)
+          ) {
+            notifyInbound("Você foi mencionado — AttendFlow", row.content, "attendflow-mention");
           }
         }
       )
@@ -69,5 +82,5 @@ export function useRealtimeMessages(conversationId?: string | null) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [qc, conversationId]);
+  }, [qc, conversationId, currentUserId]);
 }

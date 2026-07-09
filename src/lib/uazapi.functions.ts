@@ -568,11 +568,13 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       }
 
       // 2) sem chats? faz um pull global recente
+      // /message/find não aceita operator/sort/filters (só /chat/find aceita) —
+      // sem chatid ele já retorna o feed geral, mais recente primeiro.
       if (!chats.length) {
         try {
           const res = await uazapiFetch("/message/find", {
             token,
-            body: { operator: "AND", sort: "-messageTimestamp", limit: 500 },
+            body: { limit: 500 },
           });
           const msgs = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
           for (const m of [...msgs].reverse()) {
@@ -594,36 +596,51 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
 
         let offset = 0;
         let fetched = 0;
+        let exhaustedLocally = false;
         while (fetched < perChatCap) {
-          let page: any[] = [];
+          let res: any;
           try {
-            const res = await uazapiFetch("/message/find", {
+            // Filtro por conversa é o campo `chatid` direto no body — esse
+            // endpoint não tem operator/sort/filters como o /chat/find.
+            res = await uazapiFetch("/message/find", {
               token,
-              body: {
-                operator: "AND",
-                sort: "-messageTimestamp",
-                limit: PAGE,
-                offset,
-                filters: [{ field: "chatid", operator: "=", value: chatid }],
-              },
+              body: { chatid, limit: PAGE, offset },
             });
-            page = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
           } catch (e) {
             console.warn("[uazapi sync] message/find falhou:", (e as Error).message);
             errors++;
             break;
           }
-          if (!page.length) break;
+          const page: any[] = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
+          if (!page.length) { exhaustedLocally = true; break; }
           // ingere na ordem cronológica (mais antigo → mais novo)
           for (const m of [...page].reverse()) {
             try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
             catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
           }
           fetched += page.length;
-          offset += page.length;
-          if (page.length < PAGE) break; // fim do histórico
+          if (res?.hasMore === false) { exhaustedLocally = true; break; }
+          // API informa o próximo offset explicitamente — mais confiável que
+          // somar o tamanho da página (evita parar cedo ou duplicar).
+          offset = typeof res?.nextOffset === "number" ? res.nextOffset : offset + page.length;
+          if (res?.hasMore === undefined && page.length < PAGE) { exhaustedLocally = true; break; }
         }
         chatsProcessed++;
+
+        // Histórico local da instância esgotado: pede ao WhatsApp (celular
+        // conectado) pra sincronizar mensagens mais antigas. Assíncrono — as
+        // mensagens chegam depois via webhook (evento "history") e entram
+        // numa próxima sincronização. Best-effort, não conta como erro fatal.
+        if (exhaustedLocally) {
+          try {
+            await uazapiFetch("/message/history-sync", {
+              token,
+              body: { number: chatid, mode: "history", count: 100 },
+            });
+          } catch (e) {
+            console.warn("[uazapi sync] history-sync falhou:", chatid, (e as Error).message);
+          }
+        }
       }
     }
 

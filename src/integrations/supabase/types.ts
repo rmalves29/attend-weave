@@ -165,6 +165,7 @@ export type Database = {
           direction: Database["public"]["Enums"]["message_direction"]
           external_id: string | null
           id: string
+          is_internal: boolean
           media_url: string | null
           metadata: Json | null
           sender_agent_id: string | null
@@ -178,6 +179,7 @@ export type Database = {
           direction: Database["public"]["Enums"]["message_direction"]
           external_id?: string | null
           id?: string
+          is_internal?: boolean
           media_url?: string | null
           metadata?: Json | null
           sender_agent_id?: string | null
@@ -191,6 +193,7 @@ export type Database = {
           direction?: Database["public"]["Enums"]["message_direction"]
           external_id?: string | null
           id?: string
+          is_internal?: boolean
           media_url?: string | null
           metadata?: Json | null
           sender_agent_id?: string | null

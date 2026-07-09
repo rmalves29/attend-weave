@@ -264,6 +264,39 @@ export type Database = {
         }
         Relationships: []
       }
+      tags: {
+        Row: {
+          auto_message_content: string | null
+          auto_message_enabled: boolean
+          auto_message_hours: number
+          created_at: string
+          id: string
+          name: string
+          sets_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          auto_message_content?: string | null
+          auto_message_enabled?: boolean
+          auto_message_hours?: number
+          created_at?: string
+          id?: string
+          name: string
+          sets_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          auto_message_content?: string | null
+          auto_message_enabled?: boolean
+          auto_message_hours?: number
+          created_at?: string
+          id?: string
+          name?: string
+          sets_status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string

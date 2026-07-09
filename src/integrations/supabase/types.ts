@@ -264,6 +264,57 @@ export type Database = {
         }
         Relationships: []
       }
+      tag_followups: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          error: string | null
+          id: string
+          send_at: string
+          sent_at: string | null
+          status: string
+          tag_id: string
+          updated_at: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          send_at: string
+          sent_at?: string | null
+          status?: string
+          tag_id: string
+          updated_at?: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          send_at?: string
+          sent_at?: string | null
+          status?: string
+          tag_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tag_followups_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tag_followups_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tags: {
         Row: {
           auto_message_content: string | null

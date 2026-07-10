@@ -398,12 +398,65 @@ export type Database = {
           resolved_count: number
         }[]
       }
+      report_agent_performance_v2: {
+        Args: { _channel_ids?: string[]; _since: string; _until: string }
+        Returns: {
+          agent_id: string
+          agent_name: string
+          aht_secs: number
+          avg_first_response_secs: number
+          concurrent_avg: number
+          concurrent_peak: number
+          conversations_attended: number
+          first_contact_resolution_count: number
+          messages_sent: number
+          resolved_count: number
+        }[]
+      }
+      report_channel_breakdown: {
+        Args: { _since: string; _until: string }
+        Returns: {
+          avg_first_response_secs: number
+          channel_id: string
+          channel_name: string
+          channel_type: string
+          conversations_count: number
+          inbound_count: number
+          outbound_count: number
+        }[]
+      }
       report_daily_flow: {
         Args: { _since: string }
         Returns: {
           day: string
           inbound: number
           outbound: number
+        }[]
+      }
+      report_daily_flow_v2: {
+        Args: { _channel_ids?: string[]; _since: string; _until: string }
+        Returns: {
+          day: string
+          inbound: number
+          outbound: number
+        }[]
+      }
+      report_followups_summary: {
+        Args: { _since: string; _until: string }
+        Returns: {
+          cancelled_count: number
+          failed_count: number
+          scheduled_count: number
+          sent_count: number
+          upcoming: Json
+        }[]
+      }
+      report_hourly_heatmap: {
+        Args: { _channel_ids?: string[]; _since: string; _until: string }
+        Returns: {
+          dow: number
+          hour: number
+          inbound: number
         }[]
       }
       report_overview: {
@@ -418,6 +471,43 @@ export type Database = {
           conversations_resolved: number
           inbound_count: number
           outbound_count: number
+        }[]
+      }
+      report_overview_v2: {
+        Args: { _channel_ids?: string[]; _since: string; _until: string }
+        Returns: {
+          avg_first_response_secs: number
+          avg_resolution_secs: number
+          contacts_new: number
+          conversations_active: number
+          conversations_new: number
+          conversations_open_now: number
+          conversations_resolved: number
+          inbound_count: number
+          oldest_open_secs: number
+          outbound_count: number
+          p50_first_response_secs: number
+          p50_resolution_secs: number
+          p90_first_response_secs: number
+          p90_resolution_secs: number
+          p95_first_response_secs: number
+          p95_resolution_secs: number
+          sla_15m_count: number
+          sla_1h_count: number
+          sla_5m_count: number
+          sla_total_count: number
+        }[]
+      }
+      report_top_tags: {
+        Args: {
+          _channel_ids?: string[]
+          _limit?: number
+          _since: string
+          _until: string
+        }
+        Returns: {
+          conversations_count: number
+          tag_name: string
         }[]
       }
     }

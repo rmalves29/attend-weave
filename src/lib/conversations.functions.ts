@@ -72,8 +72,16 @@ export const setConversationStatus = createServerFn({ method: "POST" })
     const conv = await loadConversationForAction(supabaseAdmin, data.conversationId, context.userId, isAdmin);
 
     const patch: any = { status: data.status };
-    // resolver zera não-lidas; assumir a conversa ao agir nela
-    if (data.status === "resolved" || data.status === "closed") patch.unread_count = 0;
+    // resolver zera não-lidas e registra quem/quando (base das métricas de
+    // desempenho); reabrir limpa o registro
+    if (data.status === "resolved" || data.status === "closed") {
+      patch.unread_count = 0;
+      patch.resolved_at = new Date().toISOString();
+      patch.resolved_by = context.userId;
+    } else {
+      patch.resolved_at = null;
+      patch.resolved_by = null;
+    }
     if (!conv.assigned_agent_id) patch.assigned_agent_id = context.userId;
 
     const { error } = await supabaseAdmin

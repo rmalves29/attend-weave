@@ -42,9 +42,9 @@ Sistema de conversação entre atendentes e clientes. Base: TanStack Start + Sup
 - [ ] Pré-atendimento por bot (rastreio/status fora do horário)
 
 ## Fase 5 — Gestão
-- [ ] Métricas por atendente: primeira resposta, tempo de resolução, conversas/dia
+- [x] **Métricas por atendente** (implementado em 2026-07-09): tela de Relatórios reescrita — fluxo recebidas×enviadas por dia, KPIs, tabela de desempenho (conversas atendidas, msgs enviadas, resolvidas, tempo médio de 1ª resposta). Colunas novas `conversations.resolved_at/resolved_by` gravadas ao resolver e limpas ao reabrir (backfill aproximado via `updated_at`).
+- [x] **Relatórios agregados no banco** (mesma data): funções SQL `report_overview`, `report_daily_flow`, `report_agent_performance` chamadas via RPC com service role (migration `20260710120000`) — corrige a tela antiga que puxava todas as linhas no client (truncava em 1000 pelo PostgREST) e mostrava só as conversas visíveis pela RLS do agente logado.
 - [ ] CSAT automático ao resolver ("avalie de 1 a 5")
-- [ ] Relatórios agregados no banco (a tela atual puxa todas as linhas — não escala)
 
 ## Dívidas técnicas conhecidas
 - Stubs mortos: `src/services/evolutionApi.ts` e `metaApi.ts` (padrão VITE_ inseguro) — apagar

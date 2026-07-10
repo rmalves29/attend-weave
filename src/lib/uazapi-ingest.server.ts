@@ -167,7 +167,10 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     conversationId = conv.id;
     unread = conv.unread_count ?? 0;
     if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
-      await sb.from("conversations").update({ status: "open" }).eq("id", conv.id);
+      // reabertura automática limpa o registro de resolução (métricas)
+      await sb.from("conversations")
+        .update({ status: "open", resolved_at: null, resolved_by: null })
+        .eq("id", conv.id);
     }
   } else {
     const { data: newConv, error } = await sb.from("conversations")

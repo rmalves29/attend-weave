@@ -109,6 +109,8 @@ export type Database = {
           id: string
           last_message_at: string | null
           last_message_preview: string | null
+          resolved_at: string | null
+          resolved_by: string | null
           status: Database["public"]["Enums"]["conversation_status"]
           tags: string[] | null
           unread_count: number
@@ -122,6 +124,8 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           last_message_preview?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           tags?: string[] | null
           unread_count?: number
@@ -135,6 +139,8 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           last_message_preview?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           tags?: string[] | null
           unread_count?: number
@@ -380,6 +386,39 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      report_agent_performance: {
+        Args: { _since: string }
+        Returns: {
+          agent_id: string
+          agent_name: string
+          avg_first_response_secs: number
+          conversations_attended: number
+          messages_sent: number
+          resolved_count: number
+        }[]
+      }
+      report_daily_flow: {
+        Args: { _since: string }
+        Returns: {
+          day: string
+          inbound: number
+          outbound: number
+        }[]
+      }
+      report_overview: {
+        Args: { _since: string }
+        Returns: {
+          avg_first_response_secs: number
+          avg_resolution_secs: number
+          contacts_new: number
+          conversations_active: number
+          conversations_new: number
+          conversations_open_now: number
+          conversations_resolved: number
+          inbound_count: number
+          outbound_count: number
+        }[]
       }
     }
     Enums: {

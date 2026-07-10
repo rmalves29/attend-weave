@@ -137,7 +137,13 @@ function AtendimentoPage() {
   const syncMutation = useMutation({
     mutationFn: () => syncFn({ data: {} }),
     onSuccess: (r) => {
-      toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+      if (r.partial) {
+        toast.info(
+          `Sincronizado parcialmente: ${r.ingested} mensagens novas. Clique de novo para continuar.`,
+        );
+      } else {
+        toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+      }
       refetchConvs();
       if (selectedId) qc.invalidateQueries({ queryKey: ["messages"] });
     },

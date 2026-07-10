@@ -532,6 +532,12 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
 
     const perChatCap = data.perChatLimit ?? 2000; // teto por chat
     const PAGE = 200;
+    // Orçamento de tempo: histórico completo de muitos chats leva minutos —
+    // mais que o limite da plataforma e que a paciência do botão na UI.
+    // Retorna parcial; o dedup por external_id torna re-execuções baratas.
+    const deadline = Date.now() + 40_000;
+    const outOfTime = () => Date.now() > deadline;
+    let partial = false;
     let ingested = 0;
     let errors = 0;
     let chatsProcessed = 0;
@@ -539,6 +545,7 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
     for (const ch of channels ?? []) {
       const token = (ch.credentials as any)?.token;
       if (!token) continue;
+      if (outOfTime()) { partial = true; break; }
 
       // 1) tenta listar todos os chats disponíveis do número conectado
       let chats: any[] = [];
@@ -590,6 +597,7 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
 
       // 3) por chat, pagina até esgotar (ignora grupos)
       for (const chat of chats) {
+        if (outOfTime()) { partial = true; break; }
         const chatid: string | undefined =
           chat?.wa_chatid ?? chat?.chatid ?? chat?.id ?? chat?.jid ?? chat?.remoteJid;
         if (!chatid || chatid.includes("@g.us")) continue;
@@ -597,7 +605,7 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
         let offset = 0;
         let fetched = 0;
         let exhaustedLocally = false;
-        while (fetched < perChatCap) {
+        while (fetched < perChatCap && !outOfTime()) {
           let res: any;
           try {
             // Filtro por conversa é o campo `chatid` direto no body — esse
@@ -644,7 +652,8 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       }
     }
 
-    return { ingested, errors, channels: channels?.length ?? 0, chats: chatsProcessed };
+    if (outOfTime()) partial = true;
+    return { ingested, errors, channels: channels?.length ?? 0, chats: chatsProcessed, partial };
   });
 
 // ---------- get media URL for a message ----------

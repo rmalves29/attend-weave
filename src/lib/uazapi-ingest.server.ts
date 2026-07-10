@@ -63,10 +63,21 @@ function extractMedia(m: any): {
   // Formato flat da uazapi (messageType + content.*)
   const flatType = (m?.messageType ?? m?.mediaType ?? m?.type ?? "").toString().toLowerCase();
   const flatMap: Record<string, "image" | "video" | "audio" | "document"> = {
-    image: "image", imagemessage: "image", sticker: "image", stickermessage: "image",
-    video: "video", videomessage: "video", ptv: "video", ptvmessage: "video",
-    audio: "audio", audiomessage: "audio", ptt: "audio", pttmessage: "audio",
-    document: "document", documentmessage: "document", file: "document",
+    image: "image",
+    imagemessage: "image",
+    sticker: "image",
+    stickermessage: "image",
+    video: "video",
+    videomessage: "video",
+    ptv: "video",
+    ptvmessage: "video",
+    audio: "audio",
+    audiomessage: "audio",
+    ptt: "audio",
+    pttmessage: "audio",
+    document: "document",
+    documentmessage: "document",
+    file: "document",
   };
   const content = m?.content ?? {};
   if (flatMap[flatType]) {
@@ -74,7 +85,13 @@ function extractMedia(m: any): {
       type: flatMap[flatType],
       url: content.url ?? content.URL ?? content.directPath ?? m?.mediaUrl ?? m?.url ?? m?.file,
       mimetype: content.mimetype ?? content.mimeType ?? m?.mimetype ?? m?.mimeType,
-      filename: content.fileName ?? content.filename ?? content.title ?? m?.fileName ?? m?.filename ?? m?.docName,
+      filename:
+        content.fileName ??
+        content.filename ??
+        content.title ??
+        m?.fileName ??
+        m?.filename ??
+        m?.docName,
     };
   }
 
@@ -84,15 +101,12 @@ function extractMedia(m: any): {
 export async function ingestMessage(sb: any, channelId: string, m: any) {
   const key = m?.key ?? m;
   const remoteJid: string | undefined =
-    key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ??
-    m?.from ?? m?.sender ?? m?.jid;
+    key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ?? m?.from ?? m?.sender ?? m?.jid;
   const fromMe: boolean = Boolean(key?.fromMe ?? m?.fromMe ?? m?.from_me);
   const externalId: string | undefined =
     key?.id ?? m?.id ?? m?.messageid ?? m?.messageId ?? m?.message_id;
-  const pushName: string | undefined =
-    m?.pushName ?? m?.senderName ?? m?.name ?? m?.sender_name;
-  const timestamp: number | undefined =
-    m?.messageTimestamp ?? m?.timestamp ?? m?.t;
+  const pushName: string | undefined = m?.pushName ?? m?.senderName ?? m?.name ?? m?.sender_name;
+  const timestamp: number | undefined = m?.messageTimestamp ?? m?.timestamp ?? m?.t;
 
   const phone = extractPhone(remoteJid);
   if (!phone) return;
@@ -100,7 +114,10 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
 
   if (externalId) {
     const { data: dup } = await sb
-      .from("messages").select("id").eq("external_id", externalId).maybeSingle();
+      .from("messages")
+      .select("id")
+      .eq("external_id", externalId)
+      .maybeSingle();
     if (dup) return;
   }
 
@@ -113,11 +130,15 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
 
   const msgType = isMedia ? media.type! : "text";
   const previewLabel =
-    msgType === "image" ? "📷 Imagem" :
-    msgType === "video" ? "🎥 Vídeo" :
-    msgType === "audio" ? "🎵 Áudio" :
-    msgType === "document" ? `📄 ${media.filename || "Documento"}` :
-    "";
+    msgType === "image"
+      ? "📷 Imagem"
+      : msgType === "video"
+        ? "🎥 Vídeo"
+        : msgType === "audio"
+          ? "🎵 Áudio"
+          : msgType === "document"
+            ? `📄 ${media.filename || "Documento"}`
+            : "";
   const content = caption || previewLabel || "[mídia]";
 
   // Contato único por telefone (índice contacts_phone_unique).
@@ -128,7 +149,10 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   const contactName = !fromMe && pushName ? pushName : null;
   let contactId: string;
   const { data: existing } = await sb
-    .from("contacts").select("id, name").eq("phone", phone).maybeSingle();
+    .from("contacts")
+    .select("id, name")
+    .eq("phone", phone)
+    .maybeSingle();
   if (existing) {
     contactId = existing.id;
     // Atualiza nome se o atual é só o telefone e agora temos um nome real
@@ -136,16 +160,18 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
       await sb.from("contacts").update({ name: contactName }).eq("id", contactId);
     }
   } else {
-    const { data: created, error } = await sb.from("contacts")
+    const { data: created, error } = await sb
+      .from("contacts")
       .insert({
         name: contactName || phone,
         phone,
         source_channel_id: channelId,
         external_id: remoteJid,
-      }).select("id").single();
+      })
+      .select("id")
+      .single();
     if (error && (error as any).code === "23505") {
-      const { data: winner } = await sb
-        .from("contacts").select("id").eq("phone", phone).single();
+      const { data: winner } = await sb.from("contacts").select("id").eq("phone", phone).single();
       contactId = winner.id;
     } else if (error) {
       throw error;
@@ -159,29 +185,42 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   // (em vez de criar outra — que era o que duplicava as janelas).
   let conversationId: string;
   let unread = 0;
-  const { data: conv } = await sb.from("conversations")
-    .select("id, unread_count, status")
-    .eq("contact_id", contactId).eq("channel_id", channelId)
-    .order("created_at", { ascending: true }).limit(1).maybeSingle();
+  let lastMessageAt: string | null = null;
+  const { data: conv } = await sb
+    .from("conversations")
+    .select("id, unread_count, status, last_message_at")
+    .eq("contact_id", contactId)
+    .eq("channel_id", channelId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
   if (conv) {
     conversationId = conv.id;
     unread = conv.unread_count ?? 0;
+    lastMessageAt = conv.last_message_at ?? null;
     if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
       // reabertura automática limpa o registro de resolução (métricas)
-      await sb.from("conversations")
+      await sb
+        .from("conversations")
         .update({ status: "open", resolved_at: null, resolved_by: null })
         .eq("id", conv.id);
     }
   } else {
-    const { data: newConv, error } = await sb.from("conversations")
+    const { data: newConv, error } = await sb
+      .from("conversations")
       .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
-      .select("id").single();
+      .select("id")
+      .single();
     if (error && (error as any).code === "23505") {
-      const { data: winner } = await sb.from("conversations")
-        .select("id, unread_count")
-        .eq("contact_id", contactId).eq("channel_id", channelId).single();
+      const { data: winner } = await sb
+        .from("conversations")
+        .select("id, unread_count, last_message_at")
+        .eq("contact_id", contactId)
+        .eq("channel_id", channelId)
+        .single();
       conversationId = winner.id;
       unread = winner.unread_count ?? 0;
+      lastMessageAt = winner.last_message_at ?? null;
     } else if (error) {
       throw error;
     } else {
@@ -192,14 +231,15 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   // Cliente respondeu → cancela follow-ups automáticos pendentes da conversa
   // (a mensagem de "ainda precisa de ajuda?" não faz sentido se ela já falou).
   if (!fromMe) {
-    await sb.from("tag_followups")
+    await sb
+      .from("tag_followups")
       .update({ status: "cancelled" })
       .eq("conversation_id", conversationId)
       .eq("status", "pending");
   }
 
   const createdAt = timestamp
-    ? new Date((timestamp > 1e12 ? timestamp : timestamp * 1000)).toISOString()
+    ? new Date(timestamp > 1e12 ? timestamp : timestamp * 1000).toISOString()
     : undefined;
 
   const insertRow: any = {
@@ -211,7 +251,9 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     status: "delivered",
     metadata: {
       raw: m,
-      ...(isMedia ? { media: { url: media.url, mimetype: media.mimetype, filename: media.filename } } : {}),
+      ...(isMedia
+        ? { media: { url: media.url, mimetype: media.mimetype, filename: media.filename } }
+        : {}),
     },
   };
   if (createdAt) insertRow.created_at = createdAt;
@@ -220,9 +262,20 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   if (insertErr && (insertErr as any).code !== "23505") throw insertErr;
   if (insertErr) return;
 
-  await sb.from("conversations").update({
-    last_message_at: createdAt ?? new Date().toISOString(),
-    last_message_preview: content.slice(0, 120),
-    unread_count: fromMe ? unread : unread + 1,
-  }).eq("id", conversationId);
+  // Mensagem histórica (sync manual ou /message/history-sync reenvia antigas
+  // em rajada): não conta como não-lida nem sobrescreve o preview se a
+  // conversa já tem mensagem mais recente.
+  const effectiveAt = createdAt ?? new Date().toISOString();
+  const isHistorical = Date.now() - new Date(effectiveAt).getTime() > 2 * 60_000;
+  const isNewest = !lastMessageAt || effectiveAt >= lastMessageAt;
+
+  const patch: any = {};
+  if (isNewest) {
+    patch.last_message_at = effectiveAt;
+    patch.last_message_preview = content.slice(0, 120);
+  }
+  if (!fromMe && !isHistorical) patch.unread_count = unread + 1;
+  if (Object.keys(patch).length) {
+    await sb.from("conversations").update(patch).eq("id", conversationId);
+  }
 }

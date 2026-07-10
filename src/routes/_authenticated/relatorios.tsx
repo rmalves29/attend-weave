@@ -468,10 +468,8 @@ function Heatmap({ cells }: { cells: { dow: number; hour: number; inbound: numbe
             </div>
           ))}
           {DOWS.map((dowLabel, dow) => (
-            <>
-              <div key={`l-${dow}`} className="text-muted-foreground pr-1 self-center">
-                {dowLabel}
-              </div>
+            <Fragment key={`row-${dow}`}>
+              <div className="text-muted-foreground pr-1 self-center">{dowLabel}</div>
               {Array.from({ length: 24 }).map((_, h) => {
                 const v = map.get(`${dow}-${h}`) ?? 0;
                 const intensity = max ? v / max : 0;
@@ -489,7 +487,7 @@ function Heatmap({ cells }: { cells: { dow: number; hour: number; inbound: numbe
                   />
                 );
               })}
-            </>
+            </Fragment>
           ))}
         </div>
       </div>

@@ -199,10 +199,16 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     unread = conv.unread_count ?? 0;
     lastMessageAt = conv.last_message_at ?? null;
     if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
-      // reabertura automática limpa o registro de resolução (métricas)
+      // reabertura automática limpa a resolução e inicia novo episódio
+      // (base das métricas de tempo de resolução/AHT por episódio)
       await sb
         .from("conversations")
-        .update({ status: "open", resolved_at: null, resolved_by: null })
+        .update({
+          status: "open",
+          resolved_at: null,
+          resolved_by: null,
+          last_opened_at: new Date().toISOString(),
+        })
         .eq("id", conv.id);
     }
   } else {

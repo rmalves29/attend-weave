@@ -29,7 +29,7 @@ async function assertAgentOrAdmin(userId: string) {
 // a conversa estiver sem dono.
 async function loadConversationForAction(supabaseAdmin: any, conversationId: string, userId: string, isAdmin: boolean) {
   const { data: conv, error } = await supabaseAdmin
-    .from("conversations").select("id, assigned_agent_id, status, tags")
+    .from("conversations").select("id, assigned_agent_id, status, tags, channel_id")
     .eq("id", conversationId).single();
   if (error || !conv) throw new Error("Conversa não encontrada");
   if (!isAdmin && conv.assigned_agent_id && conv.assigned_agent_id !== userId) {
@@ -73,7 +73,7 @@ export const setConversationStatus = createServerFn({ method: "POST" })
 
     const patch: any = { status: data.status };
     // resolver zera não-lidas e registra quem/quando (base das métricas de
-    // desempenho); reabrir limpa o registro
+    // desempenho); reabrir limpa o registro e inicia um novo episódio
     if (data.status === "resolved" || data.status === "closed") {
       patch.unread_count = 0;
       patch.resolved_at = new Date().toISOString();
@@ -81,6 +81,11 @@ export const setConversationStatus = createServerFn({ method: "POST" })
     } else {
       patch.resolved_at = null;
       patch.resolved_by = null;
+      // reabertura de uma conversa resolvida marca novo episódio (AHT/resolução
+      // por episódio, não desde a criação da conversa)
+      if (conv.status === "resolved" || conv.status === "closed") {
+        patch.last_opened_at = new Date().toISOString();
+      }
     }
     if (!conv.assigned_agent_id) patch.assigned_agent_id = context.userId;
 
@@ -98,12 +103,25 @@ export const updateConversationTags = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin, isAdmin } = await assertAgentOrAdmin(context.userId);
-    await loadConversationForAction(supabaseAdmin, data.conversationId, context.userId, isAdmin);
+    const conv = await loadConversationForAction(supabaseAdmin, data.conversationId, context.userId, isAdmin);
 
+    const prev = new Set((conv.tags ?? []).map((t: string) => t.toLowerCase()));
     const tags = Array.from(new Set(data.tags.map((t) => t.toLowerCase())));
     const { error } = await supabaseAdmin
       .from("conversations").update({ tags }).eq("id", data.conversationId);
     if (error) throw new Error(error.message);
+
+    // registra evento só para tags novas (Top assuntos conta por aplicação)
+    const added = tags.filter((t) => !prev.has(t));
+    if (added.length) {
+      await supabaseAdmin.from("tag_events" as any).insert(
+        added.map((tag_name) => ({
+          conversation_id: data.conversationId,
+          channel_id: conv.channel_id ?? null,
+          tag_name,
+        })) as any,
+      );
+    }
     return { ok: true, tags };
   });
 
@@ -124,17 +142,41 @@ export const applyConversationTag = createServerFn({ method: "POST" })
       .from("tags").select("*").eq("id", data.tagId).single();
     if (tagErr || !tag) throw new Error("Etiqueta não encontrada");
 
+    const alreadyHadTag = (conv.tags ?? []).includes(tag.name);
     const tags: string[] = Array.from(new Set([...(conv.tags ?? []), tag.name]));
     const patch: any = { tags };
     if (tag.sets_status) {
       patch.status = tag.sets_status;
-      if (tag.sets_status === "resolved" || tag.sets_status === "closed") patch.unread_count = 0;
+      // Resolver via tag também alimenta as métricas de resolução (antes só o
+      // botão "Resolver" gravava resolved_at → "Resolvidas: 0" no relatório).
+      if (tag.sets_status === "resolved" || tag.sets_status === "closed") {
+        patch.unread_count = 0;
+        patch.resolved_at = new Date().toISOString();
+        patch.resolved_by = context.userId;
+      } else {
+        // Reabrir/pendente via tag limpa a resolução e marca novo episódio.
+        patch.resolved_at = null;
+        patch.resolved_by = null;
+        if (conv.status === "resolved" || conv.status === "closed") {
+          patch.last_opened_at = new Date().toISOString();
+        }
+      }
     }
     if (!conv.assigned_agent_id) patch.assigned_agent_id = context.userId;
 
     const { error } = await supabaseAdmin
       .from("conversations").update(patch).eq("id", data.conversationId);
     if (error) throw new Error(error.message);
+
+    // Registra a aplicação da tag (Top assuntos conta por evento, não por
+    // data de criação da conversa). Não repete se a conversa já tinha a tag.
+    if (!alreadyHadTag) {
+      await supabaseAdmin.from("tag_events" as any).insert({
+        conversation_id: data.conversationId,
+        channel_id: conv.channel_id ?? null,
+        tag_name: tag.name.toLowerCase(),
+      } as any);
+    }
 
     // agenda follow-up (cancela pendentes anteriores da mesma tag antes)
     if (tag.auto_message_enabled && tag.auto_message_content?.trim()) {

@@ -94,6 +94,14 @@ function RelatoriosPage() {
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [channelIds, setChannelIds] = useState<string[]>([]);
   const [tab, setTab] = useState("overview");
+  // Âncora "agora" compartilhada por todas as abas, recalculada só ao trocar
+  // período/canal — evita que cada aba fixe um "agora" diferente e mostre
+  // totais divergentes para a mesma janela.
+  const until = useMemo(
+    () => new Date().toISOString(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [days, channelIds],
+  );
 
   const channelsFn = useServerFn(getChannelsForFilter);
   const { data: channelList } = useQuery({
@@ -144,16 +152,16 @@ function RelatoriosPage() {
         </TabsList>
 
         <TabsContent value="overview">
-          <OverviewTab days={days} channelIds={channelIds} />
+          <OverviewTab days={days} channelIds={channelIds} until={until} />
         </TabsContent>
         <TabsContent value="sla">
-          <SlaTab days={days} channelIds={channelIds} />
+          <SlaTab days={days} channelIds={channelIds} until={until} />
         </TabsContent>
         <TabsContent value="team">
-          <TeamTab days={days} channelIds={channelIds} />
+          <TeamTab days={days} channelIds={channelIds} until={until} />
         </TabsContent>
         <TabsContent value="topics">
-          <TopicsTab days={days} channelIds={channelIds} />
+          <TopicsTab days={days} channelIds={channelIds} until={until} />
         </TabsContent>
       </Tabs>
     </div>
@@ -230,11 +238,11 @@ function ChannelFilter({
 // ============================================================================
 // Tab 1 — Visão geral
 // ============================================================================
-function OverviewTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: string[] }) {
+function OverviewTab({ days, channelIds, until }: { days: 7 | 30 | 90; channelIds: string[]; until: string }) {
   const fn = useServerFn(getOverviewMetrics);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["report-overview", days, channelIds],
-    queryFn: () => fn({ data: { days, channelIds } }),
+    queryKey: ["report-overview", days, channelIds, until],
+    queryFn: () => fn({ data: { days, channelIds, until } }),
     staleTime: 60_000,
   });
 
@@ -308,11 +316,11 @@ function OverviewTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: stri
 // ============================================================================
 // Tab 2 — SLA
 // ============================================================================
-function SlaTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: string[] }) {
+function SlaTab({ days, channelIds, until }: { days: 7 | 30 | 90; channelIds: string[]; until: string }) {
   const fn = useServerFn(getSlaMetrics);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["report-sla", days, channelIds],
-    queryFn: () => fn({ data: { days, channelIds } }),
+    queryKey: ["report-sla", days, channelIds, until],
+    queryFn: () => fn({ data: { days, channelIds, until } }),
     staleTime: 60_000,
   });
 
@@ -498,11 +506,11 @@ function Heatmap({ cells }: { cells: { dow: number; hour: number; inbound: numbe
 // ============================================================================
 // Tab 3 — Equipe
 // ============================================================================
-function TeamTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: string[] }) {
+function TeamTab({ days, channelIds, until }: { days: 7 | 30 | 90; channelIds: string[]; until: string }) {
   const fn = useServerFn(getTeamMetrics);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["report-team", days, channelIds],
-    queryFn: () => fn({ data: { days, channelIds } }),
+    queryKey: ["report-team", days, channelIds, until],
+    queryFn: () => fn({ data: { days, channelIds, until } }),
     staleTime: 60_000,
   });
 
@@ -596,11 +604,11 @@ function TeamTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: string[]
 // ============================================================================
 // Tab 4 — Assuntos & canais
 // ============================================================================
-function TopicsTab({ days, channelIds }: { days: 7 | 30 | 90; channelIds: string[] }) {
+function TopicsTab({ days, channelIds, until }: { days: 7 | 30 | 90; channelIds: string[]; until: string }) {
   const fn = useServerFn(getTopicsMetrics);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["report-topics", days, channelIds],
-    queryFn: () => fn({ data: { days, channelIds } }),
+    queryKey: ["report-topics", days, channelIds, until],
+    queryFn: () => fn({ data: { days, channelIds, until } }),
     staleTime: 60_000,
   });
 

@@ -77,12 +77,15 @@ export type ReportFollowupsSummary = {
 const inputSchema = z.object({
   days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
   channelIds: z.array(z.string().uuid()).optional(),
+  // `until` compartilhado pela página: sem ele cada aba fixava o "agora" no
+  // momento da própria requisição, fazendo os totais divergirem entre abas.
+  until: z.string().datetime({ offset: true }).optional(),
 });
 
 type WindowInput = z.infer<typeof inputSchema>;
 
-function windowRange(days: WindowInput["days"]) {
-  const until = new Date();
+function windowRange(days: WindowInput["days"], untilIso?: string) {
+  const until = untilIso ? new Date(untilIso) : new Date();
   const since = new Date(until.getTime() - days * 24 * 60 * 60 * 1000);
   const prevUntil = since;
   const prevSince = new Date(since.getTime() - days * 24 * 60 * 60 * 1000);
@@ -112,7 +115,7 @@ export const getOverviewMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until, prevSince, prevUntil } = windowRange(data.days);
+    const { since, until, prevSince, prevUntil } = windowRange(data.days, data.until);
     const channels = data.channelIds?.length ? data.channelIds : null;
 
     const [curr, prev, daily] = await Promise.all([
@@ -154,7 +157,7 @@ export const getSlaMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days);
+    const { since, until } = windowRange(data.days, data.until);
     const channels = data.channelIds?.length ? data.channelIds : null;
 
     const [ov, hm] = await Promise.all([
@@ -188,7 +191,7 @@ export const getTeamMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days);
+    const { since, until } = windowRange(data.days, data.until);
     const channels = data.channelIds?.length ? data.channelIds : null;
 
     const { data: rows, error } = await supabaseAdmin.rpc(
@@ -207,7 +210,7 @@ export const getTopicsMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days);
+    const { since, until } = windowRange(data.days, data.until);
     const channels = data.channelIds?.length ? data.channelIds : null;
 
     const [tags, ch, fu] = await Promise.all([

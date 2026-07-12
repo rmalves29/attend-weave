@@ -213,7 +213,10 @@ function TagsManagementCard() {
   const [name, setName] = useState("");
   const [setsStatus, setSetsStatus] = useState("none");
   const [autoEnabled, setAutoEnabled] = useState(false);
-  const [autoHours, setAutoHours] = useState(24);
+  const [autoMode, setAutoMode] = useState<"relative" | "absolute">("relative");
+  const [autoUnit, setAutoUnit] = useState<"minutes" | "hours" | "days">("hours");
+  const [autoValue, setAutoValue] = useState(24);
+  const [autoAt, setAutoAt] = useState<string>(""); // datetime-local
   const [autoContent, setAutoContent] = useState("");
 
   const { data: tags = [] } = useQuery({
@@ -221,12 +224,17 @@ function TagsManagementCard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tags" as any)
-        .select("id, name, sets_status, auto_message_enabled, auto_message_hours, auto_message_content")
+        .select("id, name, sets_status, auto_message_enabled, auto_message_mode, auto_message_unit, auto_message_value, auto_message_at, auto_message_content")
         .order("name");
       if (error) throw error;
       return (data ?? []) as unknown as {
         id: string; name: string; sets_status: string | null;
-        auto_message_enabled: boolean; auto_message_hours: number; auto_message_content: string | null;
+        auto_message_enabled: boolean;
+        auto_message_mode: "relative" | "absolute";
+        auto_message_unit: "minutes" | "hours" | "days";
+        auto_message_value: number;
+        auto_message_at: string | null;
+        auto_message_content: string | null;
       }[];
     },
   });
@@ -236,17 +244,30 @@ function TagsManagementCard() {
       const n = name.trim().toLowerCase();
       if (!n) throw new Error("Dê um nome à etiqueta");
       if (autoEnabled && !autoContent.trim()) throw new Error("Escreva a mensagem automática");
+      if (autoEnabled && autoMode === "absolute" && !autoAt) throw new Error("Escolha a data/hora do envio");
+      if (autoEnabled && autoMode === "absolute" && new Date(autoAt).getTime() <= Date.now())
+        throw new Error("A data/hora do envio precisa ser no futuro");
+
+      const maxByUnit = autoUnit === "minutes" ? 60 * 24 * 30 : autoUnit === "hours" ? 720 : 60;
+      const value = Math.min(maxByUnit, Math.max(1, autoValue || 1));
+
       const { error } = await supabase.from("tags" as any).insert({
         name: n,
         sets_status: setsStatus === "none" ? null : setsStatus,
         auto_message_enabled: autoEnabled,
-        auto_message_hours: Math.min(720, Math.max(1, autoHours || 24)),
+        auto_message_mode: autoEnabled ? autoMode : "relative",
+        auto_message_unit: autoUnit,
+        auto_message_value: value,
+        auto_message_at: autoEnabled && autoMode === "absolute" ? new Date(autoAt).toISOString() : null,
+        // mantém compat com campo antigo (não é mais lido, mas evita NULL)
+        auto_message_hours: autoUnit === "hours" ? value : autoUnit === "days" ? value * 24 : Math.max(1, Math.round(value / 60)),
         auto_message_content: autoEnabled ? autoContent.trim() : null,
       });
       if (error) throw new Error(error.code === "23505" ? `A etiqueta "${n}" já existe` : error.message);
     },
     onSuccess: () => {
-      setName(""); setSetsStatus("none"); setAutoEnabled(false); setAutoHours(24); setAutoContent("");
+      setName(""); setSetsStatus("none"); setAutoEnabled(false);
+      setAutoMode("relative"); setAutoUnit("hours"); setAutoValue(24); setAutoAt(""); setAutoContent("");
       toast.success("Etiqueta criada");
       qc.invalidateQueries({ queryKey: ["tags"] });
     },

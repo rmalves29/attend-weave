@@ -1129,7 +1129,7 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tags" as any)
-        .select("id, name, sets_status, auto_message_enabled, auto_message_hours")
+        .select("id, name, sets_status, auto_message_enabled, auto_message_mode, auto_message_unit, auto_message_value, auto_message_at")
         .order("name");
       if (error) throw error;
       return (data ?? []) as unknown as TagDef[];

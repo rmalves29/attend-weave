@@ -242,39 +242,47 @@ function AtendimentoPage() {
               Nenhuma conversa encontrada.
             </div>
           ) : (
-            filtered.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedId(c.id)}
-                className={`w-full text-left px-3 py-3 flex gap-3 border-b border-border/50 hover:bg-accent transition-colors ${
-                  selectedId === c.id ? "bg-accent" : ""
-                }`}
-              >
-                <Avatar className="w-12 h-12 flex-shrink-0">
-                  <AvatarFallback className="bg-primary/20 text-primary">
-                    {c.contacts?.name?.[0]?.toUpperCase() ?? "?"}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="font-medium truncate">{c.contacts?.name}</span>
-                    <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {c.last_message_at ? format(new Date(c.last_message_at), "HH:mm") : ""}
-                    </span>
+            filtered.map((c) => {
+              const isUnread = c.unread_count > 0;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => openConversation(c.id)}
+                  className={`w-full text-left px-3 py-3 flex gap-3 border-b border-border/50 hover:bg-accent transition-colors relative ${
+                    selectedId === c.id ? "bg-accent" : isUnread ? "bg-primary/5" : ""
+                  }`}
+                >
+                  {isUnread && (
+                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-primary" aria-hidden />
+                  )}
+                  <Avatar className="w-12 h-12 flex-shrink-0">
+                    <AvatarFallback className="bg-primary/20 text-primary">
+                      {c.contacts?.name?.[0]?.toUpperCase() ?? "?"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className={`truncate ${isUnread ? "font-bold text-foreground" : "font-medium"}`}>
+                        {c.contacts?.name}
+                      </span>
+                      <span className={`text-xs flex-shrink-0 ${isUnread ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+                        {c.last_message_at ? format(new Date(c.last_message_at), "HH:mm") : ""}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center gap-2 mt-0.5">
+                      <span className={`text-sm truncate flex items-center gap-1 ${isUnread ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
+                        {channelIcon(c.channels?.type)} {c.last_message_preview ?? "—"}
+                      </span>
+                      {isUnread && (
+                        <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 rounded-full text-xs">
+                          {c.unread_count}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center gap-2 mt-0.5">
-                    <span className="text-sm text-muted-foreground truncate flex items-center gap-1">
-                      {channelIcon(c.channels?.type)} {c.last_message_preview ?? "—"}
-                    </span>
-                    {c.unread_count > 0 && (
-                      <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 rounded-full text-xs">
-                        {c.unread_count}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </button>
-            ))
+                </button>
+              );
+            })
           )}
         </ScrollArea>
       </div>

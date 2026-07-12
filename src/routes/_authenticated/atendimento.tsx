@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow, format, isToday, isYesterday, isSameDay, isSameYear } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/_authenticated/atendimento")({
@@ -84,6 +84,14 @@ function renderWithMentions(content: string | null) {
       : <span key={i}>{part}</span>
   );
 }
+
+function dayLabel(date: Date) {
+  if (isToday(date)) return "Hoje";
+  if (isYesterday(date)) return "Ontem";
+  if (isSameYear(date, new Date())) return format(date, "EEEE, d 'de' MMMM", { locale: ptBR });
+  return format(date, "dd/MM/yyyy");
+}
+
 
 const channelIcon = (type: string) => {
   if (type === "instagram") return <Instagram className="w-3 h-3" />;
@@ -508,27 +516,41 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
             Sem mensagens ainda. Envie a primeira!
           </div>
         )}
-        {messages.map((m) => {
+        {messages.map((m, idx) => {
+          const prev = idx > 0 ? messages[idx - 1] : null;
+          const showDay = !prev || !isSameDay(new Date(prev.created_at), new Date(m.created_at));
           const isOut = m.direction === "outbound";
           const deleted = m.metadata?.deleted;
           const replyTo = m.metadata?.replyTo;
+          const daySeparator = showDay ? (
+            <div className="flex justify-center my-3">
+              <span className="text-[11px] font-medium px-3 py-1 rounded-full bg-muted text-muted-foreground shadow-sm">
+                {dayLabel(new Date(m.created_at))}
+              </span>
+            </div>
+          ) : null;
           if (m.is_internal) {
             return (
-              <div key={m.id} className="flex justify-center">
-                <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
-                  <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
-                    <StickyNote className="w-3 h-3" /> Nota interna
-                  </div>
-                  <div className="whitespace-pre-wrap break-words">{renderWithMentions(m.content)}</div>
-                  <div className="text-[10px] opacity-60 mt-1 text-right">
-                    {format(new Date(m.created_at), "HH:mm")}
+              <div key={m.id}>
+                {daySeparator}
+                <div className="flex justify-center">
+                  <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
+                    <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
+                      <StickyNote className="w-3 h-3" /> Nota interna
+                    </div>
+                    <div className="whitespace-pre-wrap break-words">{renderWithMentions(m.content)}</div>
+                    <div className="text-[10px] opacity-60 mt-1 text-right">
+                      {format(new Date(m.created_at), "HH:mm")}
+                    </div>
                   </div>
                 </div>
               </div>
             );
           }
           return (
-            <div key={m.id} className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
+            <div key={m.id}>
+              {daySeparator}
+              <div className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
               {isOut && (
                 <MessageActions
                   message={m}
@@ -581,6 +603,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
                   disabled={deleted}
                 />
               )}
+              </div>
             </div>
           );
         })}

@@ -1108,7 +1108,10 @@ type TagDef = {
   name: string;
   sets_status: string | null;
   auto_message_enabled: boolean;
-  auto_message_hours: number;
+  auto_message_mode: "relative" | "absolute";
+  auto_message_unit: "minutes" | "hours" | "days";
+  auto_message_value: number;
+  auto_message_at: string | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {

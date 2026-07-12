@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_menu_options: {
+        Row: {
+          action_type: string
+          assign_agent_id: string | null
+          created_at: string
+          id: string
+          keyword: string
+          label: string
+          position: number
+          response_text: string | null
+          updated_at: string
+        }
+        Insert: {
+          action_type?: string
+          assign_agent_id?: string | null
+          created_at?: string
+          id?: string
+          keyword: string
+          label: string
+          position?: number
+          response_text?: string | null
+          updated_at?: string
+        }
+        Update: {
+          action_type?: string
+          assign_agent_id?: string | null
+          created_at?: string
+          id?: string
+          keyword?: string
+          label?: string
+          position?: number
+          response_text?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_settings: {
+        Row: {
+          enabled: boolean
+          finalize_after_days: number
+          id: number
+          updated_at: string
+          welcome_text: string
+        }
+        Insert: {
+          enabled?: boolean
+          finalize_after_days?: number
+          id?: number
+          updated_at?: string
+          welcome_text?: string
+        }
+        Update: {
+          enabled?: boolean
+          finalize_after_days?: number
+          id?: number
+          updated_at?: string
+          welcome_text?: string
+        }
+        Relationships: []
+      }
       channels: {
         Row: {
           created_at: string
@@ -103,6 +163,7 @@ export type Database = {
       conversations: {
         Row: {
           assigned_agent_id: string | null
+          bot_active: boolean
           channel_id: string
           contact_id: string
           created_at: string
@@ -118,6 +179,7 @@ export type Database = {
         }
         Insert: {
           assigned_agent_id?: string | null
+          bot_active?: boolean
           channel_id: string
           contact_id: string
           created_at?: string
@@ -133,6 +195,7 @@ export type Database = {
         }
         Update: {
           assigned_agent_id?: string | null
+          bot_active?: boolean
           channel_id?: string
           contact_id?: string
           created_at?: string

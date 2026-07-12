@@ -186,9 +186,13 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   let conversationId: string;
   let unread = 0;
   let lastMessageAt: string | null = null;
+  let wasResolved = false;
+  let isNewConv = false;
+  let currentTags: string[] | null = null;
+  let botActive = false;
   const { data: conv } = await sb
     .from("conversations")
-    .select("id, unread_count, status, last_message_at")
+    .select("id, unread_count, status, last_message_at, tags, bot_active")
     .eq("contact_id", contactId)
     .eq("channel_id", channelId)
     .order("created_at", { ascending: true })
@@ -198,9 +202,10 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     conversationId = conv.id;
     unread = conv.unread_count ?? 0;
     lastMessageAt = conv.last_message_at ?? null;
+    currentTags = conv.tags ?? [];
+    botActive = Boolean(conv.bot_active);
     if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
-      // reabertura automática limpa a resolução e inicia novo episódio
-      // (base das métricas de tempo de resolução/AHT por episódio)
+      wasResolved = true;
       await sb
         .from("conversations")
         .update({
@@ -212,6 +217,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
         .eq("id", conv.id);
     }
   } else {
+    isNewConv = true;
     const { data: newConv, error } = await sb
       .from("conversations")
       .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
@@ -220,13 +226,16 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     if (error && (error as any).code === "23505") {
       const { data: winner } = await sb
         .from("conversations")
-        .select("id, unread_count, last_message_at")
+        .select("id, unread_count, last_message_at, tags, bot_active")
         .eq("contact_id", contactId)
         .eq("channel_id", channelId)
         .single();
       conversationId = winner.id;
       unread = winner.unread_count ?? 0;
       lastMessageAt = winner.last_message_at ?? null;
+      currentTags = winner.tags ?? [];
+      botActive = Boolean(winner.bot_active);
+      isNewConv = false;
     } else if (error) {
       throw error;
     } else {
@@ -234,8 +243,6 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     }
   }
 
-  // Cliente respondeu → cancela follow-ups automáticos pendentes da conversa
-  // (a mensagem de "ainda precisa de ajuda?" não faz sentido se ela já falou).
   if (!fromMe) {
     await sb
       .from("tag_followups")
@@ -283,5 +290,29 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   if (!fromMe && !isHistorical) patch.unread_count = unread + 1;
   if (Object.keys(patch).length) {
     await sb.from("conversations").update(patch).eq("id", conversationId);
+  }
+
+  // Chatbot de boas-vindas: só para inbound real (não histórico) e texto.
+  if (!fromMe && !isHistorical) {
+    try {
+      const { data: channelRow } = await sb
+        .from("channels").select("credentials").eq("id", channelId).single();
+      const token = (channelRow?.credentials as any)?.token;
+      if (token) {
+        const { runWelcomeBot } = await import("./bot.server");
+        await runWelcomeBot(sb, {
+          conversationId,
+          channelId,
+          phone,
+          incomingText: caption || "",
+          shouldGreet: isNewConv || wasResolved,
+          currentTags,
+          botActive,
+          token,
+        });
+      }
+    } catch (e) {
+      console.error("[welcome-bot] erro:", (e as Error).message);
+    }
   }
 }

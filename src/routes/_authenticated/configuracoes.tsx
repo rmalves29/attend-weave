@@ -325,12 +325,41 @@ function TagsManagementCard() {
         {autoEnabled && (
           <div className="space-y-2 pl-1">
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Enviar após</span>
-              <Input type="number" min={1} max={720} value={autoHours}
-                onChange={(e) => setAutoHours(Number(e.target.value))}
-                className="w-20 h-8" />
-              <span className="text-muted-foreground">horas sem resposta</span>
+              <span className="text-muted-foreground">Quando enviar:</span>
+              <Select value={autoMode} onValueChange={(v) => setAutoMode(v as "relative" | "absolute")}>
+                <SelectTrigger className="w-[220px] h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relative">Após tempo sem resposta</SelectItem>
+                  <SelectItem value="absolute">Em data/hora específica</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {autoMode === "relative" ? (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar após</span>
+                <Input type="number" min={1} value={autoValue}
+                  onChange={(e) => setAutoValue(Number(e.target.value))}
+                  className="w-20 h-8" />
+                <Select value={autoUnit} onValueChange={(v) => setAutoUnit(v as "minutes" | "hours" | "days")}>
+                  <SelectTrigger className="w-[130px] h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">minutos</SelectItem>
+                    <SelectItem value="hours">horas</SelectItem>
+                    <SelectItem value="days">dias</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">sem resposta</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar em</span>
+                <Input type="datetime-local" value={autoAt}
+                  onChange={(e) => setAutoAt(e.target.value)}
+                  className="w-[220px] h-8" />
+              </div>
+            )}
+
             <Textarea
               value={autoContent}
               onChange={(e) => setAutoContent(e.target.value)}

@@ -1011,11 +1011,13 @@ function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agent
   }
 
   const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "qualquer atendente";
+  const tagName = (id: string | null) => tags.find((t) => t.id === id)?.name ?? null;
   const actionLabel = (o: BotOption) => {
     if (o.action_type === "text") return "Resposta em texto";
     if (o.action_type === "handoff") return `Encaminhar → ${agentName(o.assign_agent_id)}`;
     return "Sem resposta (só marca)";
   };
+
 
   return (
     <div className="space-y-2 mb-4">

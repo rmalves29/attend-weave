@@ -849,7 +849,9 @@ type BotOption = {
   action_type: "text" | "handoff" | "none";
   response_text: string | null;
   assign_agent_id: string | null;
+  assign_tag_id: string | null;
 };
+
 
 function BotConfigCard() {
   const qc = useQueryClient();

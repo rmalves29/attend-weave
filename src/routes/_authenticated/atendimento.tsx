@@ -1144,7 +1144,12 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
       const tag = allTags.find((t) => t.id === tagId);
       if (tag?.sets_status) toast.success(`Etiqueta aplicada — conversa marcada como ${STATUS_LABEL[tag.sets_status] ?? tag.sets_status}`);
       else toast.success("Etiqueta aplicada");
-      if (tag?.auto_message_enabled) toast.info(`Mensagem automática agendada para daqui a ${tag.auto_message_hours}h (cancela se o cliente responder)`);
+      if (tag?.auto_message_enabled) {
+        const when = tag.auto_message_mode === "absolute" && tag.auto_message_at
+          ? new Date(tag.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+          : `daqui a ${tag.auto_message_value} ${tag.auto_message_unit === "minutes" ? "min" : tag.auto_message_unit === "days" ? "dia(s)" : "h"}`;
+        toast.info(`Mensagem automática agendada para ${when} (cancela se o cliente responder)`);
+      }
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao aplicar etiqueta"),

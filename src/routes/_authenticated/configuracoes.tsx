@@ -838,3 +838,281 @@ function ClientsCard() {
     </Card>
   );
 }
+
+// ============================ BOT DE BOAS-VINDAS ============================
+
+type BotOption = {
+  id: string;
+  position: number;
+  keyword: string;
+  label: string;
+  action_type: "text" | "handoff" | "none";
+  response_text: string | null;
+  assign_agent_id: string | null;
+};
+
+function BotConfigCard() {
+  const qc = useQueryClient();
+
+  const { data: settings } = useQuery({
+    queryKey: ["bot-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bot_settings" as any)
+        .select("enabled, welcome_text, finalize_after_days")
+        .eq("id", 1)
+        .single();
+      if (error) throw error;
+      return data as unknown as { enabled: boolean; welcome_text: string; finalize_after_days: number };
+    },
+  });
+
+  const { data: options = [] } = useQuery({
+    queryKey: ["bot-menu-options"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bot_menu_options" as any)
+        .select("id, position, keyword, label, action_type, response_text, assign_agent_id")
+        .order("position", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as unknown as BotOption[];
+    },
+  });
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents-for-bot"],
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("id, name");
+      return data ?? [];
+    },
+  });
+
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [welcomeText, setWelcomeText] = useState<string | null>(null);
+  const [finalizeDays, setFinalizeDays] = useState<number | null>(null);
+
+  const activeEnabled = enabled ?? settings?.enabled ?? true;
+  const activeWelcome = welcomeText ?? settings?.welcome_text ?? "";
+  const activeDays = finalizeDays ?? settings?.finalize_after_days ?? 5;
+
+  const saveSettings = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("bot_settings" as any).update({
+        enabled: activeEnabled,
+        welcome_text: activeWelcome.trim() || "Olá! Escolha uma opção:",
+        finalize_after_days: Math.max(1, Math.min(60, Math.round(activeDays))),
+      }).eq("id", 1);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Configurações salvas");
+      setEnabled(null); setWelcomeText(null); setFinalizeDays(null);
+      qc.invalidateQueries({ queryKey: ["bot-settings"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-5">
+        <h2 className="font-semibold mb-1 flex items-center gap-2">
+          <Bot className="w-4 h-4 text-primary" /> Bot de boas-vindas
+        </h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          No primeiro contato do cliente (ou quando a conversa é reativada depois de FINALIZADA),
+          o bot envia o menu abaixo. A conversa recebe a etiqueta <code className="bg-muted px-1 rounded">boot</code> —
+          quando um atendente responde, a etiqueta some e o bot para de atuar.
+          Depois de {activeDays} dia(s) sem novas mensagens, a conversa é finalizada automaticamente.
+        </p>
+
+        <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 mb-3">
+          <div className="text-sm">Bot ativo</div>
+          <Switch checked={activeEnabled} onCheckedChange={(v) => setEnabled(v)} />
+        </div>
+
+        <div className="space-y-2 mb-3">
+          <label className="text-xs text-muted-foreground">Mensagem de boas-vindas (aparece antes da lista de opções)</label>
+          <Textarea
+            value={activeWelcome}
+            onChange={(e) => setWelcomeText(e.target.value)}
+            rows={3}
+            placeholder="Olá! 👋 Como podemos ajudar?"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
+          <span className="text-muted-foreground">Finalizar automaticamente após</span>
+          <Input
+            type="number" min={1} max={60}
+            value={activeDays}
+            onChange={(e) => setFinalizeDays(Number(e.target.value))}
+            className="w-20 h-8"
+          />
+          <span className="text-muted-foreground">dia(s) sem novas mensagens</span>
+        </div>
+
+        <div className="flex justify-end">
+          <Button type="button" size="sm" onClick={() => saveSettings.mutate()}
+            disabled={saveSettings.isPending}>
+            <Check className="w-4 h-4 mr-1" />
+            {saveSettings.isPending ? "Salvando…" : "Salvar configurações"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold mb-1">Opções do menu</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          O cliente responde com a palavra-chave (número ou palavra) para escolher uma opção.
+          Cada opção pode enviar uma resposta em texto ou encaminhar para um atendente.
+        </p>
+
+        <BotOptionsList options={options} agents={agents as any} />
+
+        <BotOptionEditor
+          agents={agents as any}
+          nextPosition={(options[options.length - 1]?.position ?? 0) + 1}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["bot-menu-options"] })}
+        />
+      </Card>
+    </div>
+  );
+}
+
+function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { id: string; name: string }[] }) {
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("bot_menu_options" as any).delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Opção removida");
+      qc.invalidateQueries({ queryKey: ["bot-menu-options"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao remover"),
+  });
+
+  if (!options.length) {
+    return <div className="text-sm text-muted-foreground py-4 text-center">Nenhuma opção cadastrada.</div>;
+  }
+
+  const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "qualquer atendente";
+  const actionLabel = (o: BotOption) => {
+    if (o.action_type === "text") return "Resposta em texto";
+    if (o.action_type === "handoff") return `Encaminhar → ${agentName(o.assign_agent_id)}`;
+    return "Sem resposta (só marca)";
+  };
+
+  return (
+    <div className="space-y-2 mb-4">
+      {options.map((o) => (
+        <div key={o.id} className="flex items-start gap-3 p-3 rounded-lg border group hover:bg-accent/40">
+          <GripVertical className="w-4 h-4 text-muted-foreground mt-1 shrink-0" />
+          <Badge variant="outline" className="shrink-0 font-mono">{o.keyword}</Badge>
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-sm">{o.label}</div>
+            <div className="text-xs text-muted-foreground">{actionLabel(o)}</div>
+            {o.action_type === "text" && o.response_text && (
+              <div className="text-xs text-muted-foreground mt-1 italic truncate">
+                “{o.response_text}”
+              </div>
+            )}
+          </div>
+          <Button type="button" variant="ghost" size="icon"
+            className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
+            onClick={() => remove.mutate(o.id)} disabled={remove.isPending} title="Remover">
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BotOptionEditor({ agents, nextPosition, onSaved }: {
+  agents: { id: string; name: string }[]; nextPosition: number; onSaved: () => void;
+}) {
+  const [keyword, setKeyword] = useState("");
+  const [label, setLabel] = useState("");
+  const [actionType, setActionType] = useState<"text" | "handoff" | "none">("text");
+  const [responseText, setResponseText] = useState("");
+  const [assignAgentId, setAssignAgentId] = useState<string>("any");
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const k = keyword.trim();
+      const l = label.trim();
+      if (!k) throw new Error("Informe a palavra-chave (ex: 1, 2, menu)");
+      if (!l) throw new Error("Informe o rótulo da opção");
+      if (actionType === "text" && !responseText.trim()) throw new Error("Escreva a resposta");
+      const { error } = await supabase.from("bot_menu_options" as any).insert({
+        position: nextPosition,
+        keyword: k,
+        label: l,
+        action_type: actionType,
+        response_text: actionType === "text" ? responseText.trim() : null,
+        assign_agent_id: actionType === "handoff" && assignAgentId !== "any" ? assignAgentId : null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setKeyword(""); setLabel(""); setResponseText(""); setActionType("text"); setAssignAgentId("any");
+      toast.success("Opção adicionada");
+      onSaved();
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao criar opção"),
+  });
+
+  return (
+    <div className="rounded-lg border p-3 space-y-3 bg-muted/20">
+      <div className="text-sm font-medium">Nova opção</div>
+      <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] gap-2">
+        <Input value={keyword} onChange={(e) => setKeyword(e.target.value)}
+          placeholder="1" maxLength={20} />
+        <Input value={label} onChange={(e) => setLabel(e.target.value)}
+          placeholder="Ex: Falar com vendas" maxLength={80} />
+      </div>
+
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        <span className="text-muted-foreground">Ação:</span>
+        <Select value={actionType} onValueChange={(v) => setActionType(v as any)}>
+          <SelectTrigger className="w-[220px] h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="text">Enviar resposta em texto</SelectItem>
+            <SelectItem value="handoff">Encaminhar para atendente</SelectItem>
+            <SelectItem value="none">Não fazer nada (só marcar)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {actionType === "text" && (
+        <Textarea value={responseText} onChange={(e) => setResponseText(e.target.value)}
+          placeholder="Mensagem que o bot vai enviar ao cliente" rows={3} />
+      )}
+
+      {actionType === "handoff" && (
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          <span className="text-muted-foreground">Atendente:</span>
+          <Select value={assignAgentId} onValueChange={setAssignAgentId}>
+            <SelectTrigger className="w-[260px] h-8"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Qualquer atendente disponível</SelectItem>
+              {agents.map((a) => (
+                <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button type="button" size="sm" onClick={() => create.mutate()}
+          disabled={create.isPending || !keyword.trim() || !label.trim()}>
+          <Plus className="w-4 h-4 mr-1" /> Adicionar opção
+        </Button>
+      </div>
+    </div>
+  );
+}
+

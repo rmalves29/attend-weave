@@ -185,7 +185,19 @@ export const applyConversationTag = createServerFn({ method: "POST" })
         .eq("conversation_id", data.conversationId)
         .eq("tag_id", tag.id)
         .eq("status", "pending");
-      const sendAt = new Date(Date.now() + (tag.auto_message_hours ?? 24) * 60 * 60 * 1000);
+      let sendAt: Date;
+      if (tag.auto_message_mode === "absolute" && tag.auto_message_at) {
+        sendAt = new Date(tag.auto_message_at);
+        // se a data absoluta já passou, ignora o agendamento
+        if (isNaN(sendAt.getTime()) || sendAt.getTime() <= Date.now()) {
+          return { ok: true, tags, status: patch.status ?? conv.status };
+        }
+      } else {
+        const unit = tag.auto_message_unit ?? "hours";
+        const value = Number(tag.auto_message_value ?? tag.auto_message_hours ?? 24);
+        const msPerUnit = unit === "minutes" ? 60_000 : unit === "days" ? 86_400_000 : 3_600_000;
+        sendAt = new Date(Date.now() + value * msPerUnit);
+      }
       const { error: fuErr } = await supabaseAdmin.from("tag_followups").insert({
         conversation_id: data.conversationId,
         tag_id: tag.id,

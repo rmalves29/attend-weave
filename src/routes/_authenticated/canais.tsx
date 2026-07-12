@@ -19,7 +19,7 @@ import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, Refr
 import { toast } from "sonner";
 import {
   createUazapiInstance, connectUazapiInstance, getUazapiStatus,
-  disconnectUazapiInstance, deleteUazapiInstance,
+  disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
 } from "@/lib/uazapi.functions";
 
 export const Route = createFileRoute("/_authenticated/canais")({
@@ -224,6 +224,7 @@ function NewInstanceDialog({ open, onOpenChange, onCreated }: any) {
 function QrDialog({ channel, onOpenChange }: any) {
   const connectFn = useServerFn(connectUazapiInstance);
   const statusFn = useServerFn(getUazapiStatus);
+  const syncFn = useServerFn(syncUazapiHistory);
   const [qr, setQr] = useState<string | null>(null);
   const [status, setStatus] = useState<string>(channel?.status ?? "disconnected");
   const [loading, setLoading] = useState(false);
@@ -233,6 +234,23 @@ function QrDialog({ channel, onOpenChange }: any) {
     setStatus(channel.status);
     setQr(channel.qr_code ?? null);
     let cancelled = false;
+    let syncStarted = false;
+    const triggerFullSync = async () => {
+      if (syncStarted) return;
+      syncStarted = true;
+      toast.info("Carregando histórico completo do número. Isso pode levar alguns minutos…");
+      try {
+        // Roda em rajadas até esgotar — a função retorna parcial quando
+        // atinge o orçamento de tempo; nesse caso, chama de novo.
+        for (let i = 0; i < 20; i++) {
+          const r = await syncFn({ data: { channelId: channel.id, perChatLimit: 10000 } });
+          if (!r.partial) { toast.success(`Histórico sincronizado: ${r.ingested} mensagens`); break; }
+          if (cancelled) return;
+        }
+      } catch (e: any) {
+        toast.error(e?.message ?? "Falha ao sincronizar histórico");
+      }
+    };
     (async () => {
       setLoading(true);
       try {
@@ -240,6 +258,7 @@ function QrDialog({ channel, onOpenChange }: any) {
         if (cancelled) return;
         if (r.qr) setQr(r.qr);
         setStatus(r.status ?? "connecting");
+        if (r.status === "connected") { void triggerFullSync(); }
       } catch (e: any) { toast.error(e.message); }
       finally { setLoading(false); }
     })();
@@ -248,7 +267,12 @@ function QrDialog({ channel, onOpenChange }: any) {
         const r = await statusFn({ data: { channelId: channel.id } });
         if (cancelled) return;
         setStatus(r.status);
-        if (r.status === "connected") { clearInterval(interval); toast.success("WhatsApp conectado!"); onOpenChange(false); }
+        if (r.status === "connected") {
+          clearInterval(interval);
+          toast.success("WhatsApp conectado!");
+          void triggerFullSync();
+          onOpenChange(false);
+        }
       } catch {}
     }, 3000);
     return () => { cancelled = true; clearInterval(interval); };

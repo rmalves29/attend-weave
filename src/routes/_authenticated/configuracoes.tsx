@@ -874,7 +874,7 @@ function BotConfigCard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bot_menu_options" as any)
-        .select("id, position, keyword, label, action_type, response_text, assign_agent_id")
+        .select("id, position, keyword, label, action_type, response_text, assign_agent_id, assign_tag_id")
         .order("position", { ascending: true });
       if (error) throw error;
       return (data ?? []) as unknown as BotOption[];
@@ -888,6 +888,15 @@ function BotConfigCard() {
       return data ?? [];
     },
   });
+
+  const { data: tags = [] } = useQuery({
+    queryKey: ["tags-for-bot"],
+    queryFn: async () => {
+      const { data } = await supabase.from("tags").select("id, name").order("name");
+      return (data ?? []) as { id: string; name: string }[];
+    },
+  });
+
 
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [welcomeText, setWelcomeText] = useState<string | null>(null);

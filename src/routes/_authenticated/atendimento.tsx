@@ -522,16 +522,26 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
           const isOut = m.direction === "outbound";
           const deleted = m.metadata?.deleted;
           const replyTo = m.metadata?.replyTo;
+          const daySeparator = showDay ? (
+            <div className="flex justify-center my-3">
+              <span className="text-[11px] font-medium px-3 py-1 rounded-full bg-muted text-muted-foreground shadow-sm">
+                {dayLabel(new Date(m.created_at))}
+              </span>
+            </div>
+          ) : null;
           if (m.is_internal) {
             return (
-              <div key={m.id} className="flex justify-center">
-                <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
-                  <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
-                    <StickyNote className="w-3 h-3" /> Nota interna
-                  </div>
-                  <div className="whitespace-pre-wrap break-words">{renderWithMentions(m.content)}</div>
-                  <div className="text-[10px] opacity-60 mt-1 text-right">
-                    {format(new Date(m.created_at), "HH:mm")}
+              <div key={m.id}>
+                {daySeparator}
+                <div className="flex justify-center">
+                  <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
+                    <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide mb-0.5 opacity-80">
+                      <StickyNote className="w-3 h-3" /> Nota interna
+                    </div>
+                    <div className="whitespace-pre-wrap break-words">{renderWithMentions(m.content)}</div>
+                    <div className="text-[10px] opacity-60 mt-1 text-right">
+                      {format(new Date(m.created_at), "HH:mm")}
+                    </div>
                   </div>
                 </div>
               </div>

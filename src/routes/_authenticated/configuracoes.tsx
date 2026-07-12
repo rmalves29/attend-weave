@@ -64,6 +64,9 @@ function ConfigPage() {
           <TabsTrigger value="tags" className="gap-2">
             <Tag className="w-4 h-4" /> Etiquetas
           </TabsTrigger>
+          <TabsTrigger value="clients" className="gap-2">
+            <Contact className="w-4 h-4" /> Clientes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
@@ -76,6 +79,10 @@ function ConfigPage() {
 
         <TabsContent value="tags" className="mt-4">
           <TagsManagementCard />
+        </TabsContent>
+
+        <TabsContent value="clients" className="mt-4">
+          <ClientsCard />
         </TabsContent>
       </Tabs>
     </div>

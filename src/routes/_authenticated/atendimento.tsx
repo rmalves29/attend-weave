@@ -85,6 +85,12 @@ function renderWithMentions(content: string | null) {
   );
 }
 
+function dayLabel(date: Date) {
+  if (isToday(date)) return "Hoje";
+  if (isYesterday(date)) return "Ontem";
+  if (isSameYear(date, new Date())) return format(date, "EEEE, d 'de' MMMM", { locale: ptBR });
+  return format(date, "dd/MM/yyyy");
+
 const channelIcon = (type: string) => {
   if (type === "instagram") return <Instagram className="w-3 h-3" />;
   if (type === "facebook") return <Facebook className="w-3 h-3" />;

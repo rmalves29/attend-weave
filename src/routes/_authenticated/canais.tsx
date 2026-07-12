@@ -19,7 +19,7 @@ import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, Refr
 import { toast } from "sonner";
 import {
   createUazapiInstance, connectUazapiInstance, getUazapiStatus,
-  disconnectUazapiInstance, deleteUazapiInstance,
+  disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
 } from "@/lib/uazapi.functions";
 
 export const Route = createFileRoute("/_authenticated/canais")({

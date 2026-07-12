@@ -849,7 +849,9 @@ type BotOption = {
   action_type: "text" | "handoff" | "none";
   response_text: string | null;
   assign_agent_id: string | null;
+  assign_tag_id: string | null;
 };
+
 
 function BotConfigCard() {
   const qc = useQueryClient();
@@ -872,7 +874,7 @@ function BotConfigCard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bot_menu_options" as any)
-        .select("id, position, keyword, label, action_type, response_text, assign_agent_id")
+        .select("id, position, keyword, label, action_type, response_text, assign_agent_id, assign_tag_id")
         .order("position", { ascending: true });
       if (error) throw error;
       return (data ?? []) as unknown as BotOption[];
@@ -886,6 +888,15 @@ function BotConfigCard() {
       return data ?? [];
     },
   });
+
+  const { data: tags = [] } = useQuery({
+    queryKey: ["tags-for-bot"],
+    queryFn: async () => {
+      const { data } = await supabase.from("tags").select("id, name").order("name");
+      return (data ?? []) as { id: string; name: string }[];
+    },
+  });
+
 
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [welcomeText, setWelcomeText] = useState<string | null>(null);
@@ -967,10 +978,11 @@ function BotConfigCard() {
           Cada opção pode enviar uma resposta em texto ou encaminhar para um atendente.
         </p>
 
-        <BotOptionsList options={options} agents={agents as any} />
+        <BotOptionsList options={options} agents={agents as any} tags={tags} />
 
         <BotOptionEditor
           agents={agents as any}
+          tags={tags}
           nextPosition={(options[options.length - 1]?.position ?? 0) + 1}
           onSaved={() => qc.invalidateQueries({ queryKey: ["bot-menu-options"] })}
         />
@@ -979,7 +991,8 @@ function BotConfigCard() {
   );
 }
 
-function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { id: string; name: string }[] }) {
+function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agents: { id: string; name: string }[]; tags: { id: string; name: string }[] }) {
+
   const qc = useQueryClient();
   const remove = useMutation({
     mutationFn: async (id: string) => {
@@ -998,11 +1011,13 @@ function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { i
   }
 
   const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "qualquer atendente";
+  const tagName = (id: string | null) => tags.find((t) => t.id === id)?.name ?? null;
   const actionLabel = (o: BotOption) => {
     if (o.action_type === "text") return "Resposta em texto";
     if (o.action_type === "handoff") return `Encaminhar → ${agentName(o.assign_agent_id)}`;
     return "Sem resposta (só marca)";
   };
+
 
   return (
     <div className="space-y-2 mb-4">
@@ -1011,7 +1026,12 @@ function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { i
           <GripVertical className="w-4 h-4 text-muted-foreground mt-1 shrink-0" />
           <Badge variant="outline" className="shrink-0 font-mono">{o.keyword}</Badge>
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm">{o.label}</div>
+            <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+              {o.label}
+              {tagName(o.assign_tag_id) && (
+                <Badge variant="secondary" className="text-[10px]">🏷 {tagName(o.assign_tag_id)}</Badge>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground">{actionLabel(o)}</div>
             {o.action_type === "text" && o.response_text && (
               <div className="text-xs text-muted-foreground mt-1 italic truncate">
@@ -1019,6 +1039,7 @@ function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { i
               </div>
             )}
           </div>
+
           <Button type="button" variant="ghost" size="icon"
             className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
             onClick={() => remove.mutate(o.id)} disabled={remove.isPending} title="Remover">
@@ -1030,14 +1051,18 @@ function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { i
   );
 }
 
-function BotOptionEditor({ agents, nextPosition, onSaved }: {
-  agents: { id: string; name: string }[]; nextPosition: number; onSaved: () => void;
+function BotOptionEditor({ agents, tags, nextPosition, onSaved }: {
+  agents: { id: string; name: string }[];
+  tags: { id: string; name: string }[];
+  nextPosition: number;
+  onSaved: () => void;
 }) {
   const [keyword, setKeyword] = useState("");
   const [label, setLabel] = useState("");
   const [actionType, setActionType] = useState<"text" | "handoff" | "none">("text");
   const [responseText, setResponseText] = useState("");
   const [assignAgentId, setAssignAgentId] = useState<string>("any");
+  const [assignTagId, setAssignTagId] = useState<string>("none");
 
   const create = useMutation({
     mutationFn: async () => {
@@ -1053,16 +1078,19 @@ function BotOptionEditor({ agents, nextPosition, onSaved }: {
         action_type: actionType,
         response_text: actionType === "text" ? responseText.trim() : null,
         assign_agent_id: actionType === "handoff" && assignAgentId !== "any" ? assignAgentId : null,
+        assign_tag_id: assignTagId !== "none" ? assignTagId : null,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      setKeyword(""); setLabel(""); setResponseText(""); setActionType("text"); setAssignAgentId("any");
+      setKeyword(""); setLabel(""); setResponseText(""); setActionType("text");
+      setAssignAgentId("any"); setAssignTagId("none");
       toast.success("Opção adicionada");
       onSaved();
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao criar opção"),
   });
+
 
   return (
     <div className="rounded-lg border p-3 space-y-3 bg-muted/20">
@@ -1106,11 +1134,25 @@ function BotOptionEditor({ agents, nextPosition, onSaved }: {
         </div>
       )}
 
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        <span className="text-muted-foreground">Etiqueta ao escolher:</span>
+        <Select value={assignTagId} onValueChange={setAssignTagId}>
+          <SelectTrigger className="w-[260px] h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Nenhuma</SelectItem>
+            {tags.map((t) => (
+              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="flex justify-end">
         <Button type="button" size="sm" onClick={() => create.mutate()}
           disabled={create.isPending || !keyword.trim() || !label.trim()}>
           <Plus className="w-4 h-4 mr-1" /> Adicionar opção
         </Button>
+
       </div>
     </div>
   );

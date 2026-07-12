@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           action_type: string
           assign_agent_id: string | null
+          assign_tag_id: string | null
           created_at: string
           id: string
           keyword: string
@@ -29,6 +30,7 @@ export type Database = {
         Insert: {
           action_type?: string
           assign_agent_id?: string | null
+          assign_tag_id?: string | null
           created_at?: string
           id?: string
           keyword: string
@@ -40,6 +42,7 @@ export type Database = {
         Update: {
           action_type?: string
           assign_agent_id?: string | null
+          assign_tag_id?: string | null
           created_at?: string
           id?: string
           keyword?: string
@@ -48,7 +51,15 @@ export type Database = {
           response_text?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "bot_menu_options_assign_tag_id_fkey"
+            columns: ["assign_tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bot_settings: {
         Row: {

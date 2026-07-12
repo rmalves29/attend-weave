@@ -74,7 +74,9 @@ type MenuOption = {
   action_type: "text" | "handoff" | "none";
   response_text: string | null;
   assign_agent_id: string | null;
+  assign_tag_id: string | null;
 };
+
 
 async function loadBotConfig(sb: any) {
   const { data: settings } = await sb
@@ -85,8 +87,9 @@ async function loadBotConfig(sb: any) {
   if (!settings?.enabled) return null;
   const { data: opts } = await sb
     .from("bot_menu_options")
-    .select("id, position, keyword, label, action_type, response_text, assign_agent_id")
+    .select("id, position, keyword, label, action_type, response_text, assign_agent_id, assign_tag_id")
     .order("position", { ascending: true });
+
   const options = (opts ?? []) as MenuOption[];
   if (!options.length) return null;
   return { welcomeText: settings.welcome_text as string, options };
@@ -152,6 +155,14 @@ export async function runWelcomeBot(
   const choice = matchOption(args.incomingText, cfg.options);
   if (!choice) return; // sem match: bot fica em silêncio, aguarda atendente
 
+  // Se a opção tem etiqueta vinculada, busca o nome e adiciona à conversa.
+  let tagsAfter = args.currentTags ?? [];
+  if (choice.assign_tag_id) {
+    const { data: tagRow } = await sb
+      .from("tags").select("name").eq("id", choice.assign_tag_id).maybeSingle();
+    if (tagRow?.name) tagsAfter = addTag(tagsAfter, tagRow.name);
+  }
+
   if (choice.action_type === "text" && choice.response_text?.trim()) {
     const res = await uazapiSendText(args.token, args.phone, choice.response_text);
     if (!res.ok) {
@@ -162,6 +173,9 @@ export async function runWelcomeBot(
       step: "option",
       option_id: choice.id,
     });
+    if (choice.assign_tag_id) {
+      await sb.from("conversations").update({ tags: tagsAfter }).eq("id", args.conversationId);
+    }
     // permanece em BOOT — próximas mensagens do cliente ficam em silêncio até
     // o atendente entrar, evitando spam do bot.
     return;
@@ -170,7 +184,7 @@ export async function runWelcomeBot(
   if (choice.action_type === "handoff") {
     const patch: any = {
       bot_active: false,
-      tags: (args.currentTags ?? []).filter((t) => t.toLowerCase() !== "boot"),
+      tags: tagsAfter.filter((t) => t.toLowerCase() !== "boot"),
       status: "open",
     };
     if (choice.assign_agent_id) patch.assigned_agent_id = choice.assign_agent_id;
@@ -178,6 +192,10 @@ export async function runWelcomeBot(
     return;
   }
 
-  // action_type === "none": só marca escolha, sem responder
+  // action_type === "none": aplica a etiqueta (se houver) e segue em silêncio
+  if (choice.assign_tag_id) {
+    await sb.from("conversations").update({ tags: tagsAfter }).eq("id", args.conversationId);
+  }
   return;
 }
+

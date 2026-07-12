@@ -323,9 +323,13 @@ export type Database = {
       }
       tags: {
         Row: {
+          auto_message_at: string | null
           auto_message_content: string | null
           auto_message_enabled: boolean
           auto_message_hours: number
+          auto_message_mode: string
+          auto_message_unit: string
+          auto_message_value: number
           created_at: string
           id: string
           name: string
@@ -333,9 +337,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          auto_message_at?: string | null
           auto_message_content?: string | null
           auto_message_enabled?: boolean
           auto_message_hours?: number
+          auto_message_mode?: string
+          auto_message_unit?: string
+          auto_message_value?: number
           created_at?: string
           id?: string
           name: string
@@ -343,9 +351,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          auto_message_at?: string | null
           auto_message_content?: string | null
           auto_message_enabled?: boolean
           auto_message_hours?: number
+          auto_message_mode?: string
+          auto_message_unit?: string
+          auto_message_value?: number
           created_at?: string
           id?: string
           name?: string

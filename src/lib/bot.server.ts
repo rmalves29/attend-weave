@@ -196,9 +196,6 @@ export async function runWelcomeBot(
   if (choice.assign_tag_id) {
     await sb.from("conversations").update({ tags: tagsAfter }).eq("id", args.conversationId);
   }
-
-  }
-
-  // action_type === "none": só marca escolha, sem responder
   return;
 }
+

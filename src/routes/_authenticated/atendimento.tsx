@@ -548,7 +548,9 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
             );
           }
           return (
-            <div key={m.id} className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
+            <div key={m.id}>
+              {daySeparator}
+              <div className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
               {isOut && (
                 <MessageActions
                   message={m}

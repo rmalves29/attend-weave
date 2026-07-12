@@ -1108,7 +1108,10 @@ type TagDef = {
   name: string;
   sets_status: string | null;
   auto_message_enabled: boolean;
-  auto_message_hours: number;
+  auto_message_mode: "relative" | "absolute";
+  auto_message_unit: "minutes" | "hours" | "days";
+  auto_message_value: number;
+  auto_message_at: string | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -1126,7 +1129,7 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tags" as any)
-        .select("id, name, sets_status, auto_message_enabled, auto_message_hours")
+        .select("id, name, sets_status, auto_message_enabled, auto_message_mode, auto_message_unit, auto_message_value, auto_message_at")
         .order("name");
       if (error) throw error;
       return (data ?? []) as unknown as TagDef[];
@@ -1141,7 +1144,12 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
       const tag = allTags.find((t) => t.id === tagId);
       if (tag?.sets_status) toast.success(`Etiqueta aplicada — conversa marcada como ${STATUS_LABEL[tag.sets_status] ?? tag.sets_status}`);
       else toast.success("Etiqueta aplicada");
-      if (tag?.auto_message_enabled) toast.info(`Mensagem automática agendada para daqui a ${tag.auto_message_hours}h (cancela se o cliente responder)`);
+      if (tag?.auto_message_enabled) {
+        const when = tag.auto_message_mode === "absolute" && tag.auto_message_at
+          ? new Date(tag.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+          : `daqui a ${tag.auto_message_value} ${tag.auto_message_unit === "minutes" ? "min" : tag.auto_message_unit === "days" ? "dia(s)" : "h"}`;
+        toast.info(`Mensagem automática agendada para ${when} (cancela se o cliente responder)`);
+      }
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao aplicar etiqueta"),
@@ -1199,7 +1207,7 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
                 <span className="font-medium">{t.name}</span>
                 <span className="text-[10px] text-muted-foreground">
                   {t.sets_status ? `muda status → ${STATUS_LABEL[t.sets_status] ?? t.sets_status}` : "não muda status"}
-                  {t.auto_message_enabled ? ` · msg automática em ${t.auto_message_hours}h` : ""}
+                  {t.auto_message_enabled ? ` · msg automática ${t.auto_message_mode === "absolute" && t.auto_message_at ? `em ${new Date(t.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : `em ${t.auto_message_value} ${t.auto_message_unit === "minutes" ? "min" : t.auto_message_unit === "days" ? "d" : "h"}`}` : ""}
                 </span>
               </div>
             </DropdownMenuItem>

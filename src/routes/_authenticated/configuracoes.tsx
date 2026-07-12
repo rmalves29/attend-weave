@@ -213,7 +213,10 @@ function TagsManagementCard() {
   const [name, setName] = useState("");
   const [setsStatus, setSetsStatus] = useState("none");
   const [autoEnabled, setAutoEnabled] = useState(false);
-  const [autoHours, setAutoHours] = useState(24);
+  const [autoMode, setAutoMode] = useState<"relative" | "absolute">("relative");
+  const [autoUnit, setAutoUnit] = useState<"minutes" | "hours" | "days">("hours");
+  const [autoValue, setAutoValue] = useState(24);
+  const [autoAt, setAutoAt] = useState<string>(""); // datetime-local
   const [autoContent, setAutoContent] = useState("");
 
   const { data: tags = [] } = useQuery({
@@ -221,12 +224,17 @@ function TagsManagementCard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tags" as any)
-        .select("id, name, sets_status, auto_message_enabled, auto_message_hours, auto_message_content")
+        .select("id, name, sets_status, auto_message_enabled, auto_message_mode, auto_message_unit, auto_message_value, auto_message_at, auto_message_content")
         .order("name");
       if (error) throw error;
       return (data ?? []) as unknown as {
         id: string; name: string; sets_status: string | null;
-        auto_message_enabled: boolean; auto_message_hours: number; auto_message_content: string | null;
+        auto_message_enabled: boolean;
+        auto_message_mode: "relative" | "absolute";
+        auto_message_unit: "minutes" | "hours" | "days";
+        auto_message_value: number;
+        auto_message_at: string | null;
+        auto_message_content: string | null;
       }[];
     },
   });
@@ -236,17 +244,30 @@ function TagsManagementCard() {
       const n = name.trim().toLowerCase();
       if (!n) throw new Error("Dê um nome à etiqueta");
       if (autoEnabled && !autoContent.trim()) throw new Error("Escreva a mensagem automática");
+      if (autoEnabled && autoMode === "absolute" && !autoAt) throw new Error("Escolha a data/hora do envio");
+      if (autoEnabled && autoMode === "absolute" && new Date(autoAt).getTime() <= Date.now())
+        throw new Error("A data/hora do envio precisa ser no futuro");
+
+      const maxByUnit = autoUnit === "minutes" ? 60 * 24 * 30 : autoUnit === "hours" ? 720 : 60;
+      const value = Math.min(maxByUnit, Math.max(1, autoValue || 1));
+
       const { error } = await supabase.from("tags" as any).insert({
         name: n,
         sets_status: setsStatus === "none" ? null : setsStatus,
         auto_message_enabled: autoEnabled,
-        auto_message_hours: Math.min(720, Math.max(1, autoHours || 24)),
+        auto_message_mode: autoEnabled ? autoMode : "relative",
+        auto_message_unit: autoUnit,
+        auto_message_value: value,
+        auto_message_at: autoEnabled && autoMode === "absolute" ? new Date(autoAt).toISOString() : null,
+        // mantém compat com campo antigo (não é mais lido, mas evita NULL)
+        auto_message_hours: autoUnit === "hours" ? value : autoUnit === "days" ? value * 24 : Math.max(1, Math.round(value / 60)),
         auto_message_content: autoEnabled ? autoContent.trim() : null,
       });
       if (error) throw new Error(error.code === "23505" ? `A etiqueta "${n}" já existe` : error.message);
     },
     onSuccess: () => {
-      setName(""); setSetsStatus("none"); setAutoEnabled(false); setAutoHours(24); setAutoContent("");
+      setName(""); setSetsStatus("none"); setAutoEnabled(false);
+      setAutoMode("relative"); setAutoUnit("hours"); setAutoValue(24); setAutoAt(""); setAutoContent("");
       toast.success("Etiqueta criada");
       qc.invalidateQueries({ queryKey: ["tags"] });
     },
@@ -304,12 +325,41 @@ function TagsManagementCard() {
         {autoEnabled && (
           <div className="space-y-2 pl-1">
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Enviar após</span>
-              <Input type="number" min={1} max={720} value={autoHours}
-                onChange={(e) => setAutoHours(Number(e.target.value))}
-                className="w-20 h-8" />
-              <span className="text-muted-foreground">horas sem resposta</span>
+              <span className="text-muted-foreground">Quando enviar:</span>
+              <Select value={autoMode} onValueChange={(v) => setAutoMode(v as "relative" | "absolute")}>
+                <SelectTrigger className="w-[220px] h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relative">Após tempo sem resposta</SelectItem>
+                  <SelectItem value="absolute">Em data/hora específica</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {autoMode === "relative" ? (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar após</span>
+                <Input type="number" min={1} value={autoValue}
+                  onChange={(e) => setAutoValue(Number(e.target.value))}
+                  className="w-20 h-8" />
+                <Select value={autoUnit} onValueChange={(v) => setAutoUnit(v as "minutes" | "hours" | "days")}>
+                  <SelectTrigger className="w-[130px] h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">minutos</SelectItem>
+                    <SelectItem value="hours">horas</SelectItem>
+                    <SelectItem value="days">dias</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">sem resposta</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar em</span>
+                <Input type="datetime-local" value={autoAt}
+                  onChange={(e) => setAutoAt(e.target.value)}
+                  className="w-[220px] h-8" />
+              </div>
+            )}
+
             <Textarea
               value={autoContent}
               onChange={(e) => setAutoContent(e.target.value)}
@@ -340,7 +390,12 @@ function TagsManagementCard() {
               {t.auto_message_enabled && (
                 <div className="flex items-start gap-1">
                   <Clock className="w-3 h-3 mt-0.5 shrink-0" />
-                  <span>Em {t.auto_message_hours}h: “{t.auto_message_content}”</span>
+                  <span>
+                    {t.auto_message_mode === "absolute" && t.auto_message_at
+                      ? `Em ${new Date(t.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                      : `Após ${t.auto_message_value} ${t.auto_message_unit === "minutes" ? "min" : t.auto_message_unit === "days" ? "dia(s)" : "h"}`}
+                    : “{t.auto_message_content}”
+                  </span>
                 </div>
               )}
             </div>

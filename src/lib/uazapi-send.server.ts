@@ -50,13 +50,22 @@ export async function sendTextViaUazapi(
     .single();
   if (insErr && (insErr as any).code !== "23505") throw insErr;
 
+  const convPatch: any = {
+    assigned_agent_id: conv.assigned_agent_id ?? params.senderAgentId,
+    last_message_at: new Date().toISOString(),
+    last_message_preview: params.text.slice(0, 120),
+  };
+  // Atendente/admin respondeu → tira BOOT e status vira ABERTO (bot silencia).
+  if (params.senderAgentId) {
+    convPatch.bot_active = false;
+    const { data: convTags } = await supabaseAdmin
+      .from("conversations").select("tags").eq("id", conv.id).single();
+    convPatch.tags = (convTags?.tags ?? []).filter((t: string) => t.toLowerCase() !== "boot");
+    convPatch.status = "open";
+  }
   await supabaseAdmin
     .from("conversations")
-    .update({
-      assigned_agent_id: conv.assigned_agent_id ?? params.senderAgentId,
-      last_message_at: new Date().toISOString(),
-      last_message_preview: params.text.slice(0, 120),
-    })
+    .update(convPatch)
     .eq("id", conv.id);
 
   return { ok: true as const, externalId, messageId: inserted?.id as string | undefined };

@@ -516,7 +516,9 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
             Sem mensagens ainda. Envie a primeira!
           </div>
         )}
-        {messages.map((m) => {
+        {messages.map((m, idx) => {
+          const prev = idx > 0 ? messages[idx - 1] : null;
+          const showDay = !prev || !isSameDay(new Date(prev.created_at), new Date(m.created_at));
           const isOut = m.direction === "outbound";
           const deleted = m.metadata?.deleted;
           const replyTo = m.metadata?.replyTo;

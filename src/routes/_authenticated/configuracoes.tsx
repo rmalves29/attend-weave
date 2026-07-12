@@ -383,35 +383,193 @@ function TagsManagementCard() {
           <div className="text-sm text-muted-foreground py-4 text-center">Nenhuma etiqueta cadastrada.</div>
         )}
         {tags.map((t) => (
-          <div key={t.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-accent group">
-            <Badge variant="secondary" className="shrink-0">{t.name}</Badge>
-            <div className="flex-1 text-xs text-muted-foreground space-y-0.5">
-              <div>Status: {statusLabel(t.sets_status)}</div>
-              {t.auto_message_enabled && (
-                <div className="flex items-start gap-1">
-                  <Clock className="w-3 h-3 mt-0.5 shrink-0" />
-                  <span>
-                    {t.auto_message_mode === "absolute" && t.auto_message_at
-                      ? `Em ${new Date(t.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
-                      : `Após ${t.auto_message_value} ${t.auto_message_unit === "minutes" ? "min" : t.auto_message_unit === "days" ? "dia(s)" : "h"}`}
-                    : “{t.auto_message_content}”
-                  </span>
-                </div>
-              )}
-            </div>
-            <Button
-              type="button" variant="ghost" size="icon"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
-              onClick={() => deleteMutation.mutate(t.id)}
-              disabled={deleteMutation.isPending}
-              title="Remover etiqueta"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
+          <TagRow key={t.id} tag={t} onDelete={() => deleteMutation.mutate(t.id)}
+            deleting={deleteMutation.isPending} statusLabel={statusLabel} />
         ))}
       </div>
     </Card>
+  );
+}
+
+type TagRecord = {
+  id: string; name: string; sets_status: string | null;
+  auto_message_enabled: boolean;
+  auto_message_mode: "relative" | "absolute";
+  auto_message_unit: "minutes" | "hours" | "days";
+  auto_message_value: number;
+  auto_message_at: string | null;
+  auto_message_content: string | null;
+};
+
+function TagRow({ tag, onDelete, deleting, statusLabel }: {
+  tag: TagRecord; onDelete: () => void; deleting: boolean;
+  statusLabel: (v: string | null) => string | null | undefined;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(tag.name);
+  const [setsStatus, setSetsStatus] = useState(tag.sets_status ?? "none");
+  const [autoEnabled, setAutoEnabled] = useState(tag.auto_message_enabled);
+  const [autoMode, setAutoMode] = useState<"relative" | "absolute">(tag.auto_message_mode ?? "relative");
+  const [autoUnit, setAutoUnit] = useState<"minutes" | "hours" | "days">(tag.auto_message_unit ?? "hours");
+  const [autoValue, setAutoValue] = useState(tag.auto_message_value ?? 24);
+  const [autoAt, setAutoAt] = useState<string>(
+    tag.auto_message_at ? new Date(tag.auto_message_at).toISOString().slice(0, 16) : ""
+  );
+  const [autoContent, setAutoContent] = useState(tag.auto_message_content ?? "");
+
+  const startEdit = () => {
+    setName(tag.name);
+    setSetsStatus(tag.sets_status ?? "none");
+    setAutoEnabled(tag.auto_message_enabled);
+    setAutoMode(tag.auto_message_mode ?? "relative");
+    setAutoUnit(tag.auto_message_unit ?? "hours");
+    setAutoValue(tag.auto_message_value ?? 24);
+    setAutoAt(tag.auto_message_at ? new Date(tag.auto_message_at).toISOString().slice(0, 16) : "");
+    setAutoContent(tag.auto_message_content ?? "");
+    setEditing(true);
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      const n = name.trim().toLowerCase();
+      if (!n) throw new Error("Dê um nome à etiqueta");
+      if (autoEnabled && !autoContent.trim()) throw new Error("Escreva a mensagem automática");
+      if (autoEnabled && autoMode === "absolute" && !autoAt) throw new Error("Escolha a data/hora do envio");
+      if (autoEnabled && autoMode === "absolute" && new Date(autoAt).getTime() <= Date.now())
+        throw new Error("A data/hora do envio precisa ser no futuro");
+
+      const maxByUnit = autoUnit === "minutes" ? 60 * 24 * 30 : autoUnit === "hours" ? 720 : 60;
+      const value = Math.min(maxByUnit, Math.max(1, autoValue || 1));
+
+      const { error } = await supabase.from("tags" as any).update({
+        name: n,
+        sets_status: setsStatus === "none" ? null : setsStatus,
+        auto_message_enabled: autoEnabled,
+        auto_message_mode: autoEnabled ? autoMode : "relative",
+        auto_message_unit: autoUnit,
+        auto_message_value: value,
+        auto_message_at: autoEnabled && autoMode === "absolute" ? new Date(autoAt).toISOString() : null,
+        auto_message_hours: autoUnit === "hours" ? value : autoUnit === "days" ? value * 24 : Math.max(1, Math.round(value / 60)),
+        auto_message_content: autoEnabled ? autoContent.trim() : null,
+      }).eq("id", tag.id);
+      if (error) throw new Error(error.code === "23505" ? `A etiqueta "${n}" já existe` : error.message);
+    },
+    onSuccess: () => {
+      toast.success("Etiqueta atualizada");
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["tags"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Falha ao atualizar"),
+  });
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border p-3 space-y-3 bg-muted/20">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
+          <Select value={setsStatus} onValueChange={setSetsStatus}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TAG_STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
+          <div className="text-sm flex items-center gap-2">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            Enviar mensagem automática se o cliente não responder
+          </div>
+          <Switch checked={autoEnabled} onCheckedChange={setAutoEnabled} />
+        </div>
+
+        {autoEnabled && (
+          <div className="space-y-2 pl-1">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Quando enviar:</span>
+              <Select value={autoMode} onValueChange={(v) => setAutoMode(v as "relative" | "absolute")}>
+                <SelectTrigger className="w-[220px] h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relative">Após tempo sem resposta</SelectItem>
+                  <SelectItem value="absolute">Em data/hora específica</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {autoMode === "relative" ? (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar após</span>
+                <Input type="number" min={1} value={autoValue}
+                  onChange={(e) => setAutoValue(Number(e.target.value))} className="w-20 h-8" />
+                <Select value={autoUnit} onValueChange={(v) => setAutoUnit(v as "minutes" | "hours" | "days")}>
+                  <SelectTrigger className="w-[130px] h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">minutos</SelectItem>
+                    <SelectItem value="hours">horas</SelectItem>
+                    <SelectItem value="days">dias</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">sem resposta</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-muted-foreground">Enviar em</span>
+                <Input type="datetime-local" value={autoAt}
+                  onChange={(e) => setAutoAt(e.target.value)} className="w-[220px] h-8" />
+              </div>
+            )}
+
+            <Textarea value={autoContent} onChange={(e) => setAutoContent(e.target.value)}
+              placeholder="Mensagem que o cliente vai receber" rows={3} />
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}
+            disabled={updateMutation.isPending}>
+            <X className="w-4 h-4 mr-1" /> Cancelar
+          </Button>
+          <Button type="button" size="sm" onClick={() => updateMutation.mutate()}
+            disabled={updateMutation.isPending || !name.trim()}>
+            <Check className="w-4 h-4 mr-1" />
+            {updateMutation.isPending ? "Salvando…" : "Salvar"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-accent group">
+      <Badge variant="secondary" className="shrink-0">{tag.name}</Badge>
+      <div className="flex-1 text-xs text-muted-foreground space-y-0.5">
+        <div>Status: {statusLabel(tag.sets_status)}</div>
+        {tag.auto_message_enabled && (
+          <div className="flex items-start gap-1">
+            <Clock className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>
+              {tag.auto_message_mode === "absolute" && tag.auto_message_at
+                ? `Em ${new Date(tag.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                : `Após ${tag.auto_message_value} ${tag.auto_message_unit === "minutes" ? "min" : tag.auto_message_unit === "days" ? "dia(s)" : "h"}`}
+              : “{tag.auto_message_content}”
+            </span>
+          </div>
+        )}
+      </div>
+      <Button type="button" variant="ghost" size="icon"
+        className="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0"
+        onClick={startEdit} title="Editar etiqueta">
+        <Pencil className="w-4 h-4" />
+      </Button>
+      <Button type="button" variant="ghost" size="icon"
+        className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
+        onClick={onDelete} disabled={deleting} title="Remover etiqueta">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    </div>
   );
 }
 

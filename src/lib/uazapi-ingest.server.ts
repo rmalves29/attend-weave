@@ -291,4 +291,28 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   if (Object.keys(patch).length) {
     await sb.from("conversations").update(patch).eq("id", conversationId);
   }
+
+  // Chatbot de boas-vindas: só para inbound real (não histórico) e texto.
+  if (!fromMe && !isHistorical) {
+    try {
+      const { data: channelRow } = await sb
+        .from("channels").select("credentials").eq("id", channelId).single();
+      const token = (channelRow?.credentials as any)?.token;
+      if (token) {
+        const { runWelcomeBot } = await import("./bot.server");
+        await runWelcomeBot(sb, {
+          conversationId,
+          channelId,
+          phone,
+          incomingText: caption || "",
+          shouldGreet: isNewConv || wasResolved,
+          currentTags,
+          botActive,
+          token,
+        });
+      }
+    } catch (e) {
+      console.error("[welcome-bot] erro:", (e as Error).message);
+    }
+  }
 }

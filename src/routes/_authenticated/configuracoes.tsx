@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Zap, Trash2, Plus, Users, UserPlus, Tag, Clock, Contact, Search } from "lucide-react";
+import { Zap, Trash2, Plus, Users, UserPlus, Tag, Clock, Contact, Search, Pencil, X, Check } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({

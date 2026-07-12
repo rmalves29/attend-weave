@@ -87,8 +87,9 @@ async function loadBotConfig(sb: any) {
   if (!settings?.enabled) return null;
   const { data: opts } = await sb
     .from("bot_menu_options")
-    .select("id, position, keyword, label, action_type, response_text, assign_agent_id")
+    .select("id, position, keyword, label, action_type, response_text, assign_agent_id, assign_tag_id")
     .order("position", { ascending: true });
+
   const options = (opts ?? []) as MenuOption[];
   if (!options.length) return null;
   return { welcomeText: settings.welcome_text as string, options };

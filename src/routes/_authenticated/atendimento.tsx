@@ -169,6 +169,19 @@ function AtendimentoPage() {
 
   const selected = conversations.find((c) => c.id === selectedId);
 
+  // Ao abrir uma conversa com não-lidas, zera o contador (marca como lida).
+  const openConversation = async (id: string) => {
+    setSelectedId(id);
+    const conv = conversations.find((c) => c.id === id);
+    if (conv && conv.unread_count > 0) {
+      // Otimista no cache
+      qc.setQueryData<Conversation[]>(["conversations"], (prev) =>
+        prev?.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)) ?? prev,
+      );
+      await supabase.from("conversations").update({ unread_count: 0 }).eq("id", id);
+    }
+  };
+
   return (
     <div className="flex h-full">
       {/* Coluna 1: lista de conversas */}

@@ -1134,11 +1134,25 @@ function BotOptionEditor({ agents, tags, nextPosition, onSaved }: {
         </div>
       )}
 
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        <span className="text-muted-foreground">Etiqueta ao escolher:</span>
+        <Select value={assignTagId} onValueChange={setAssignTagId}>
+          <SelectTrigger className="w-[260px] h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Nenhuma</SelectItem>
+            {tags.map((t) => (
+              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="flex justify-end">
         <Button type="button" size="sm" onClick={() => create.mutate()}
           disabled={create.isPending || !keyword.trim() || !label.trim()}>
           <Plus className="w-4 h-4 mr-1" /> Adicionar opção
         </Button>
+
       </div>
     </div>
   );

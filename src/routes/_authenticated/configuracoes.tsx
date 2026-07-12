@@ -390,7 +390,12 @@ function TagsManagementCard() {
               {t.auto_message_enabled && (
                 <div className="flex items-start gap-1">
                   <Clock className="w-3 h-3 mt-0.5 shrink-0" />
-                  <span>Em {t.auto_message_hours}h: “{t.auto_message_content}”</span>
+                  <span>
+                    {t.auto_message_mode === "absolute" && t.auto_message_at
+                      ? `Em ${new Date(t.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                      : `Após ${t.auto_message_value} ${t.auto_message_unit === "minutes" ? "min" : t.auto_message_unit === "days" ? "dia(s)" : "h"}`}
+                    : “{t.auto_message_content}”
+                  </span>
                 </div>
               )}
             </div>

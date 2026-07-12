@@ -1026,7 +1026,12 @@ function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agent
           <GripVertical className="w-4 h-4 text-muted-foreground mt-1 shrink-0" />
           <Badge variant="outline" className="shrink-0 font-mono">{o.keyword}</Badge>
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm">{o.label}</div>
+            <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+              {o.label}
+              {tagName(o.assign_tag_id) && (
+                <Badge variant="secondary" className="text-[10px]">🏷 {tagName(o.assign_tag_id)}</Badge>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground">{actionLabel(o)}</div>
             {o.action_type === "text" && o.response_text && (
               <div className="text-xs text-muted-foreground mt-1 italic truncate">
@@ -1034,6 +1039,7 @@ function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agent
               </div>
             )}
           </div>
+
           <Button type="button" variant="ghost" size="icon"
             className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
             onClick={() => remove.mutate(o.id)} disabled={remove.isPending} title="Remover">

@@ -74,7 +74,9 @@ type MenuOption = {
   action_type: "text" | "handoff" | "none";
   response_text: string | null;
   assign_agent_id: string | null;
+  assign_tag_id: string | null;
 };
+
 
 async function loadBotConfig(sb: any) {
   const { data: settings } = await sb

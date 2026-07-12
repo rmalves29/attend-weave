@@ -978,10 +978,11 @@ function BotConfigCard() {
           Cada opção pode enviar uma resposta em texto ou encaminhar para um atendente.
         </p>
 
-        <BotOptionsList options={options} agents={agents as any} />
+        <BotOptionsList options={options} agents={agents as any} tags={tags} />
 
         <BotOptionEditor
           agents={agents as any}
+          tags={tags}
           nextPosition={(options[options.length - 1]?.position ?? 0) + 1}
           onSaved={() => qc.invalidateQueries({ queryKey: ["bot-menu-options"] })}
         />
@@ -990,7 +991,8 @@ function BotConfigCard() {
   );
 }
 
-function BotOptionsList({ options, agents }: { options: BotOption[]; agents: { id: string; name: string }[] }) {
+function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agents: { id: string; name: string }[]; tags: { id: string; name: string }[] }) {
+
   const qc = useQueryClient();
   const remove = useMutation({
     mutationFn: async (id: string) => {

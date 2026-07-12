@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Zap, Trash2, Plus, Users, UserPlus, Tag, Clock } from "lucide-react";
+import { Zap, Trash2, Plus, Users, UserPlus, Tag, Clock, Contact, Search } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
@@ -64,6 +64,9 @@ function ConfigPage() {
           <TabsTrigger value="tags" className="gap-2">
             <Tag className="w-4 h-4" /> Etiquetas
           </TabsTrigger>
+          <TabsTrigger value="clients" className="gap-2">
+            <Contact className="w-4 h-4" /> Clientes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
@@ -76,6 +79,10 @@ function ConfigPage() {
 
         <TabsContent value="tags" className="mt-4">
           <TagsManagementCard />
+        </TabsContent>
+
+        <TabsContent value="clients" className="mt-4">
+          <ClientsCard />
         </TabsContent>
       </Tabs>
     </div>
@@ -450,6 +457,163 @@ function QuickRepliesCard() {
             </Button>
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+function ClientsCard() {
+  const [search, setSearch] = useState("");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["clients-overview"],
+    queryFn: async () => {
+      const [contactsRes, convRes, channelsRes] = await Promise.all([
+        supabase
+          .from("contacts")
+          .select("id, name, phone, created_at")
+          .order("created_at", { ascending: false })
+          .limit(1000),
+        supabase
+          .from("conversations")
+          .select("contact_id, channel_id, tags, last_message_at"),
+        supabase.from("channels").select("id, name, identifier"),
+      ]);
+      if (contactsRes.error) throw contactsRes.error;
+      if (convRes.error) throw convRes.error;
+      if (channelsRes.error) throw channelsRes.error;
+
+      const channelsById = new Map(
+        (channelsRes.data ?? []).map((c: any) => [c.id, c]),
+      );
+
+      const byContact = new Map<
+        string,
+        { channels: Map<string, { name: string; identifier: string | null }>; tags: Set<string>; lastAt: string | null }
+      >();
+      for (const c of convRes.data ?? []) {
+        if (!c.contact_id) continue;
+        const entry = byContact.get(c.contact_id) ?? {
+          channels: new Map(),
+          tags: new Set<string>(),
+          lastAt: null,
+        };
+        const ch = channelsById.get(c.channel_id);
+        if (ch) entry.channels.set(ch.id, { name: ch.name, identifier: ch.identifier });
+        for (const t of (c.tags ?? []) as string[]) entry.tags.add(t);
+        if (c.last_message_at && (!entry.lastAt || c.last_message_at > entry.lastAt)) {
+          entry.lastAt = c.last_message_at;
+        }
+        byContact.set(c.contact_id, entry);
+      }
+
+      return (contactsRes.data ?? []).map((ct: any) => {
+        const info = byContact.get(ct.id);
+        return {
+          id: ct.id,
+          name: ct.name || ct.phone || "Sem nome",
+          phone: ct.phone,
+          channels: info ? Array.from(info.channels.values()) : [],
+          tags: info ? Array.from(info.tags).sort() : [],
+          lastAt: info?.lastAt ?? null,
+        };
+      });
+    },
+  });
+
+  const rows = (data ?? []).filter((r) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (
+      r.name.toLowerCase().includes(q) ||
+      (r.phone ?? "").toLowerCase().includes(q) ||
+      r.tags.some((t) => t.toLowerCase().includes(q)) ||
+      r.channels.some((c) => (c.identifier ?? "").toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
+    );
+  });
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-semibold mb-1 flex items-center gap-2">
+        <Contact className="w-4 h-4 text-primary" /> Clientes
+      </h2>
+      <p className="text-xs text-muted-foreground mb-4">
+        Todos os contatos que já enviaram mensagem. Mostra o número do cliente,
+        por qual canal ele entrou em contato e as etiquetas já aplicadas.
+      </p>
+
+      <div className="relative mb-4">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome, número, canal ou etiqueta"
+          className="pl-9"
+        />
+      </div>
+
+      {isLoading && (
+        <div className="text-sm text-muted-foreground py-6 text-center">Carregando…</div>
+      )}
+
+      {!isLoading && rows.length === 0 && (
+        <div className="text-sm text-muted-foreground py-6 text-center">
+          Nenhum cliente encontrado.
+        </div>
+      )}
+
+      {!isLoading && rows.length > 0 && (
+        <div className="overflow-x-auto -mx-5">
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground border-b">
+              <tr>
+                <th className="text-left font-medium px-5 py-2">Cliente</th>
+                <th className="text-left font-medium px-3 py-2">Número do cliente</th>
+                <th className="text-left font-medium px-3 py-2">Canal(is) contatado(s)</th>
+                <th className="text-left font-medium px-5 py-2">Etiquetas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b last:border-0 hover:bg-accent/40">
+                  <td className="px-5 py-2">
+                    <div className="font-medium">{r.name}</div>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs">{r.phone ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    {r.channels.length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        {r.channels.map((c, i) => (
+                          <div key={i} className="text-xs">
+                            <span className="font-mono">{c.identifier ?? "—"}</span>
+                            <span className="text-muted-foreground"> · {c.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-2">
+                    {r.tags.length === 0 ? (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {r.tags.map((t) => (
+                          <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground mt-3">
+        {rows.length} {rows.length === 1 ? "cliente" : "clientes"}
       </div>
     </Card>
   );

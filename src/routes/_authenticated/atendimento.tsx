@@ -1207,7 +1207,7 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
                 <span className="font-medium">{t.name}</span>
                 <span className="text-[10px] text-muted-foreground">
                   {t.sets_status ? `muda status → ${STATUS_LABEL[t.sets_status] ?? t.sets_status}` : "não muda status"}
-                  {t.auto_message_enabled ? ` · msg automática em ${t.auto_message_hours}h` : ""}
+                  {t.auto_message_enabled ? ` · msg automática ${t.auto_message_mode === "absolute" && t.auto_message_at ? `em ${new Date(t.auto_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : `em ${t.auto_message_value} ${t.auto_message_unit === "minutes" ? "min" : t.auto_message_unit === "days" ? "d" : "h"}`}` : ""}
                 </span>
               </div>
             </DropdownMenuItem>

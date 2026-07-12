@@ -1051,14 +1051,18 @@ function BotOptionsList({ options, agents, tags }: { options: BotOption[]; agent
   );
 }
 
-function BotOptionEditor({ agents, nextPosition, onSaved }: {
-  agents: { id: string; name: string }[]; nextPosition: number; onSaved: () => void;
+function BotOptionEditor({ agents, tags, nextPosition, onSaved }: {
+  agents: { id: string; name: string }[];
+  tags: { id: string; name: string }[];
+  nextPosition: number;
+  onSaved: () => void;
 }) {
   const [keyword, setKeyword] = useState("");
   const [label, setLabel] = useState("");
   const [actionType, setActionType] = useState<"text" | "handoff" | "none">("text");
   const [responseText, setResponseText] = useState("");
   const [assignAgentId, setAssignAgentId] = useState<string>("any");
+  const [assignTagId, setAssignTagId] = useState<string>("none");
 
   const create = useMutation({
     mutationFn: async () => {
@@ -1074,16 +1078,19 @@ function BotOptionEditor({ agents, nextPosition, onSaved }: {
         action_type: actionType,
         response_text: actionType === "text" ? responseText.trim() : null,
         assign_agent_id: actionType === "handoff" && assignAgentId !== "any" ? assignAgentId : null,
+        assign_tag_id: assignTagId !== "none" ? assignTagId : null,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      setKeyword(""); setLabel(""); setResponseText(""); setActionType("text"); setAssignAgentId("any");
+      setKeyword(""); setLabel(""); setResponseText(""); setActionType("text");
+      setAssignAgentId("any"); setAssignTagId("none");
       toast.success("Opção adicionada");
       onSaved();
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao criar opção"),
   });
+
 
   return (
     <div className="rounded-lg border p-3 space-y-3 bg-muted/20">

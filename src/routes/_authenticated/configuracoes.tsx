@@ -58,6 +58,9 @@ function ConfigPage() {
           <TabsTrigger value="users" className="gap-2">
             <Users className="w-4 h-4" /> Usuários
           </TabsTrigger>
+          <TabsTrigger value="bot" className="gap-2">
+            <Bot className="w-4 h-4" /> Bot de boas-vindas
+          </TabsTrigger>
           <TabsTrigger value="quick-replies" className="gap-2">
             <Zap className="w-4 h-4" /> Respostas rápidas
           </TabsTrigger>
@@ -71,6 +74,10 @@ function ConfigPage() {
 
         <TabsContent value="users" className="mt-4">
           <UsersSection currentUserId={user.id} />
+        </TabsContent>
+
+        <TabsContent value="bot" className="mt-4">
+          <BotConfigCard />
         </TabsContent>
 
         <TabsContent value="quick-replies" className="mt-4">

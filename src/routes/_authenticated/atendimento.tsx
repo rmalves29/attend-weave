@@ -603,6 +603,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
                   disabled={deleted}
                 />
               )}
+              </div>
             </div>
           );
         })}

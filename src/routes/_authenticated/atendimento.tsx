@@ -122,9 +122,12 @@ function AtendimentoPage() {
   const { data: conversations = [], isFetching: isFetchingConvs, refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"],
     queryFn: async () => {
+      // Últimos 6 meses (baseado na última mensagem) — conversas mais antigas ficam de fora da lista.
+      const sixMonthsAgo = new Date(Date.now() - 183 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("conversations")
         .select("*, contacts(*), channels(id,name,type,identifier,status)")
+        .gte("last_message_at", sixMonthsAgo)
         .order("last_message_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as unknown as Conversation[];

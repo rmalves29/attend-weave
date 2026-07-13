@@ -457,6 +457,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
       setText("");
       setMentionIds([]);
       qc.invalidateQueries({ queryKey: ["messages"] });
+      qc.invalidateQueries({ queryKey: ["internal-notes", conversation.id] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao salvar nota"),
   });

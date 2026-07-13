@@ -1270,6 +1270,68 @@ function TagsEditor({ conversation }: { conversation: Conversation }) {
   );
 }
 
+function NotesSection({ conversationId }: { conversationId: string }) {
+  const { data: notes = [] } = useQuery({
+    queryKey: ["internal-notes", conversationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, content, created_at, sender_agent_id")
+        .eq("conversation_id", conversationId)
+        .eq("is_internal", true)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const agentIds = Array.from(new Set(notes.map((n: any) => n.sender_agent_id).filter(Boolean)));
+  const { data: agents = [] } = useQuery({
+    queryKey: ["note-agents", agentIds.sort().join(",")],
+    enabled: agentIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("id, name").in("id", agentIds);
+      return data ?? [];
+    },
+  });
+  const agentName = (id: string | null) =>
+    (agents as any[]).find((a) => a.id === id)?.name ?? "Atendente";
+
+  return (
+    <div className="pt-4 border-t border-border">
+      <div className="flex items-center gap-2 mb-2 text-sm font-medium">
+        <StickyNote className="w-4 h-4" /> Notas internas
+        {notes.length > 0 && (
+          <Badge variant="secondary" className="ml-auto">{notes.length}</Badge>
+        )}
+      </div>
+      {notes.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nenhuma nota adicionada.</p>
+      ) : (
+        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+          {notes.map((n: any) => {
+            const d = new Date(n.created_at);
+            return (
+              <div key={n.id} className="rounded-md bg-amber-500/10 border border-amber-500/20 p-2">
+                <p className="text-xs whitespace-pre-wrap break-words">
+                  {renderWithMentions(n.content)}
+                </p>
+                <div className="mt-1 text-[10px] text-muted-foreground flex items-center justify-between">
+                  <span>{agentName(n.sender_agent_id)}</span>
+                  <span title={format(d, "dd/MM/yyyy HH:mm", { locale: ptBR })}>
+                    {format(d, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function ContactPanel({ conversation }: { conversation: Conversation }) {
   const c = conversation.contacts;
   return (

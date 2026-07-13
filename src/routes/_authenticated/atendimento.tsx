@@ -1300,6 +1300,7 @@ function ContactPanel({ conversation }: { conversation: Conversation }) {
           </div>
         )}
         <TagsEditor conversation={conversation} />
+        <NotesSection conversationId={conversation.id} />
         <ScheduledMessagesSection conversationId={conversation.id} />
         {conversation.last_message_at && (
           <div className="text-xs text-muted-foreground pt-4 border-t border-border">

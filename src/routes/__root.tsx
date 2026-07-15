@@ -78,26 +78,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "AttendFlow Pro is a multi-channel customer service platform that mimics WhatsApp Web." },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "AttendFlow Pro is a multi-channel customer service platform that mimics WhatsApp Web." },
+      { title: "AttendFlow — Atendimento Multicanal" },
+      { name: "description", content: "AttendFlow é a plataforma de atendimento multicanal com experiência inspirada no WhatsApp Web." },
+      { name: "author", content: "AttendFlow" },
+      { property: "og:title", content: "AttendFlow — Atendimento Multicanal" },
+      { property: "og:description", content: "Plataforma de atendimento multicanal moderna, rápida e clean." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "Lovable App" },
-      { name: "twitter:description", content: "AttendFlow Pro is a multi-channel customer service platform that mimics WhatsApp Web." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a5a613db-4011-42e3-af9e-f7718fbcacbc/id-preview-0bda92cd--c56d84cf-72f4-4f06-9087-bd03bba2712f.lovable.app-1780627078536.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a5a613db-4011-42e3-af9e-f7718fbcacbc/id-preview-0bda92cd--c56d84cf-72f4-4f06-9087-bd03bba2712f.lovable.app-1780627078536.png" },
+      { name: "twitter:title", content: "AttendFlow — Atendimento Multicanal" },
+      { name: "twitter:description", content: "Plataforma de atendimento multicanal moderna, rápida e clean." },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Figtree:wght@400;500;600&display=swap" },
     ],
   }),
+
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
@@ -124,7 +122,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <Toaster theme="dark" position="top-right" richColors />
+      <Toaster theme="light" position="top-right" richColors />
     </QueryClientProvider>
   );
 }

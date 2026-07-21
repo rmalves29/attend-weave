@@ -15,12 +15,30 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, RefreshCw, Power } from "lucide-react";
+import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, RefreshCw, Power, Download } from "lucide-react";
 import { toast } from "sonner";
 import {
   createUazapiInstance, connectUazapiInstance, getUazapiStatus,
   disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
 } from "@/lib/uazapi.functions";
+
+async function runFullSync(channelId: string, syncFn: any) {
+  toast.info("Sincronizando histórico completo… isso pode levar alguns minutos.");
+  let total = 0;
+  try {
+    for (let i = 0; i < 40; i++) {
+      const r = await syncFn({ data: { channelId, perChatLimit: 10000 } });
+      total = r.ingested ?? total;
+      if (!r.partial) {
+        toast.success(`Histórico sincronizado: ${r.ingested} mensagens em ${r.chats} conversas`);
+        return;
+      }
+    }
+    toast.success(`Sincronização parcial concluída: ${total} mensagens (execute novamente para continuar)`);
+  } catch (e: any) {
+    toast.error(e?.message ?? "Falha ao sincronizar histórico");
+  }
+}
 
 export const Route = createFileRoute("/_authenticated/canais")({
   head: () => ({ meta: [{ title: "Canais — AttendFlow" }] }),

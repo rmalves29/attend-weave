@@ -328,8 +328,12 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
         replyid: reply?.shortId,
       },
     });
-    const externalId: string | null =
+    const rawExternalId: string | null =
       res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
+    // Normaliza pra bater com o formato do webhook/sync ("<jid>:<HEX>" → "<HEX>")
+    const externalId: string | null = rawExternalId
+      ? (String(rawExternalId).match(/^\d+:(.+)$/)?.[1] ?? String(rawExternalId))
+      : null;
 
     const contentPreview = data.caption?.trim() || `[${kind}] ${data.filename}`;
 

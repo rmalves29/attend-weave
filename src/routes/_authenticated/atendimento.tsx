@@ -168,12 +168,23 @@ function AtendimentoPage() {
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
-      if (filter !== "all" && c.status !== filter) return false;
+      if (filter === "unread") {
+        if (!(c.unread_count > 0)) return false;
+      } else if (filter !== "all" && c.status !== filter) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return c.contacts?.name?.toLowerCase().includes(q) || c.last_message_preview?.toLowerCase().includes(q);
     });
   }, [conversations, search, filter]);
+
+  const unreadTotal = useMemo(
+    () => conversations.reduce((sum, c) => sum + (c.unread_count > 0 ? c.unread_count : 0), 0),
+    [conversations],
+  );
+  const unreadConvCount = useMemo(
+    () => conversations.filter((c) => c.unread_count > 0).length,
+    [conversations],
+  );
 
   const selected = conversations.find((c) => c.id === selectedId);
 

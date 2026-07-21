@@ -112,8 +112,17 @@ function UsersSection({ currentUserId }: { currentUserId: string }) {
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("*, user_roles(role)");
-      return data ?? [];
+      const [{ data: profiles }, { data: roles }] = await Promise.all([
+        supabase.from("profiles").select("*"),
+        supabase.from("user_roles").select("user_id, role"),
+      ]);
+      const rolesByUser = new Map<string, { role: string }[]>();
+      (roles ?? []).forEach((r: any) => {
+        const list = rolesByUser.get(r.user_id) ?? [];
+        list.push({ role: r.role });
+        rolesByUser.set(r.user_id, list);
+      });
+      return (profiles ?? []).map((p: any) => ({ ...p, user_roles: rolesByUser.get(p.id) ?? [] }));
     },
   });
 

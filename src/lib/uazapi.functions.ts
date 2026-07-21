@@ -468,6 +468,7 @@ export const forwardUazapiMessage = createServerFn({ method: "POST" })
         },
       });
       externalId = res?.messageid ?? res?.id ?? null;
+      if (externalId) externalId = String(externalId).match(/^\d+:(.+)$/)?.[1] ?? String(externalId);
       previewContent = previewContent || `[${kind}] ${filename}`;
 
       await supabaseAdmin.from("messages").insert({

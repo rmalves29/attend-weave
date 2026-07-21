@@ -142,22 +142,6 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
   const Icon = iconFor(channel.type);
   const disconnectFn = useServerFn(disconnectUazapiInstance);
   const statusFn = useServerFn(getUazapiStatus);
-
-  const [busy, setBusy] = useState(false);
-
-  const handleDisconnect = async () => {
-    setBusy(true);
-    try {
-      await disconnectFn({ data: { channelId: channel.id } });
-      toast.success("Desconectado");
-      onChanged();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setBusy(false); }
-  };
-function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
-  const Icon = iconFor(channel.type);
-  const disconnectFn = useServerFn(disconnectUazapiInstance);
-  const statusFn = useServerFn(getUazapiStatus);
   const syncFn = useServerFn(syncUazapiHistory);
 
   const [busy, setBusy] = useState(false);

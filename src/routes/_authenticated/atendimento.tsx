@@ -260,15 +260,15 @@ function AtendimentoPage() {
                     selectedId === c.id
                       ? "bg-accent"
                       : isUnread
-                        ? "bg-primary/10 hover:bg-primary/[0.14]"
+                        ? "bg-emerald-500/10 hover:bg-emerald-500/[0.14]"
                         : "hover:bg-accent"
                   }`}
                 >
                   {isUnread && (
-                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-primary" aria-hidden />
+                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" aria-hidden />
                   )}
                   <Avatar className="w-12 h-12 flex-shrink-0">
-                    <AvatarFallback className="bg-primary/20 text-primary">
+                    <AvatarFallback className="bg-emerald-500/20 text-emerald-600">
                       {c.contacts?.name?.[0]?.toUpperCase() ?? "?"}
                     </AvatarFallback>
                   </Avatar>
@@ -277,7 +277,7 @@ function AtendimentoPage() {
                       <span className={`truncate ${isUnread ? "font-bold text-foreground" : "font-medium"}`}>
                         {c.contacts?.name}
                       </span>
-                      <span className={`text-xs flex-shrink-0 ${isUnread ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+                      <span className={`text-xs flex-shrink-0 ${isUnread ? "text-emerald-600 font-semibold" : "text-muted-foreground"}`}>
                         {c.last_message_at ? format(new Date(c.last_message_at), "HH:mm") : ""}
                       </span>
                     </div>

@@ -98,13 +98,25 @@ function extractMedia(m: any): {
   return { type: null };
 }
 
+// uazapi devolve o mesmo id em dois formatos: "<jid>:<HEX>" (webhook) e
+// "<HEX>" (history sync). Normalizamos para o HEX puro pra o índice único
+// em messages.external_id colapsar as duas linhas.
+function normalizeExternalId(id: string | undefined | null): string | null {
+  if (!id) return null;
+  const trimmed = String(id).trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^\d+:(.+)$/);
+  return m ? m[1] : trimmed;
+}
+
 export async function ingestMessage(sb: any, channelId: string, m: any) {
   const key = m?.key ?? m;
   const remoteJid: string | undefined =
     key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ?? m?.from ?? m?.sender ?? m?.jid;
   const fromMe: boolean = Boolean(key?.fromMe ?? m?.fromMe ?? m?.from_me);
-  const externalId: string | undefined =
-    key?.id ?? m?.id ?? m?.messageid ?? m?.messageId ?? m?.message_id;
+  const externalId: string | null = normalizeExternalId(
+    key?.id ?? m?.id ?? m?.messageid ?? m?.messageId ?? m?.message_id,
+  );
   const pushName: string | undefined = m?.pushName ?? m?.senderName ?? m?.name ?? m?.sender_name;
   const timestamp: number | undefined = m?.messageTimestamp ?? m?.timestamp ?? m?.t;
 
@@ -120,6 +132,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
       .maybeSingle();
     if (dup) return;
   }
+
 
   const caption = extractText(m);
   const media = extractMedia(m);

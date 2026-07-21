@@ -15,12 +15,30 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, RefreshCw, Power } from "lucide-react";
+import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, RefreshCw, Power, Download } from "lucide-react";
 import { toast } from "sonner";
 import {
   createUazapiInstance, connectUazapiInstance, getUazapiStatus,
   disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
 } from "@/lib/uazapi.functions";
+
+async function runFullSync(channelId: string, syncFn: any) {
+  toast.info("Sincronizando histórico completo… isso pode levar alguns minutos.");
+  let total = 0;
+  try {
+    for (let i = 0; i < 40; i++) {
+      const r = await syncFn({ data: { channelId, perChatLimit: 10000 } });
+      total = r.ingested ?? total;
+      if (!r.partial) {
+        toast.success(`Histórico sincronizado: ${r.ingested} mensagens em ${r.chats} conversas`);
+        return;
+      }
+    }
+    toast.success(`Sincronização parcial concluída: ${total} mensagens (execute novamente para continuar)`);
+  } catch (e: any) {
+    toast.error(e?.message ?? "Falha ao sincronizar histórico");
+  }
+}
 
 export const Route = createFileRoute("/_authenticated/canais")({
   head: () => ({ meta: [{ title: "Canais — AttendFlow" }] }),
@@ -124,8 +142,10 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
   const Icon = iconFor(channel.type);
   const disconnectFn = useServerFn(disconnectUazapiInstance);
   const statusFn = useServerFn(getUazapiStatus);
+  const syncFn = useServerFn(syncUazapiHistory);
 
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const handleDisconnect = async () => {
     setBusy(true);
@@ -143,6 +163,11 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
       onChanged();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
+  };
+  const handleSync = async () => {
+    setSyncing(true);
+    try { await runFullSync(channel.id, syncFn); onChanged(); }
+    finally { setSyncing(false); }
   };
 
   return (
@@ -163,9 +188,15 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
             <QrCode className="w-4 h-4 mr-2" /> Conectar
           </Button>
         ) : (
-          <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={handleDisconnect} disabled={busy}>
-            <Power className="w-4 h-4 mr-2" /> Desconectar
-          </Button>
+          <>
+            <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={handleSync} disabled={busy || syncing}>
+              {syncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              Sincronizar histórico
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDisconnect} disabled={busy || syncing} title="Desconectar">
+              <Power className="w-4 h-4" />
+            </Button>
+          </>
         )}
         <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={busy} title="Atualizar status">
           <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />

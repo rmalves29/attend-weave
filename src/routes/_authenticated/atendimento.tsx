@@ -765,6 +765,25 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            if (noteMode) return;
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const it of Array.from(items)) {
+              if (it.kind === "file") {
+                const f = it.getAsFile();
+                if (f) {
+                  e.preventDefault();
+                  const ext = (f.type.split("/")[1] || "png").split("+")[0];
+                  const named = f.name && f.name !== "image.png"
+                    ? f
+                    : new File([f], `colada-${Date.now()}.${ext}`, { type: f.type });
+                  mediaMutation.mutate(named);
+                  return;
+                }
+              }
+            }
+          }}
           placeholder={noteMode ? "Escrever nota interna..." : reply ? "Responder..." : "Digite uma mensagem (/ para respostas rápidas)"}
           className="bg-input border-0 flex-1"
         />

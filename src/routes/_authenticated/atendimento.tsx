@@ -102,7 +102,7 @@ const channelIcon = (type: string) => {
 function AtendimentoPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "open" | "pending" | "resolved">("all");
+  const [filter, setFilter] = useState<"all" | "unread" | "open" | "pending" | "resolved">("all");
 
   const qc = useQueryClient();
 

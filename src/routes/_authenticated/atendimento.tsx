@@ -241,19 +241,39 @@ function AtendimentoPage() {
               className="pl-9 bg-input border-0"
             />
           </div>
-          <div className="flex gap-1 mt-3 text-xs">
-            {(["all", "open", "pending", "resolved"] as const).map((f) => (
+          <div className="flex gap-1 mt-3 text-xs flex-wrap">
+            {(["all", "unread", "open", "pending", "resolved"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded-full transition-colors ${
+                className={`px-3 py-1 rounded-full transition-colors inline-flex items-center gap-1 ${
                   filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
                 }`}
               >
-                {f === "all" ? "Todos" : f === "open" ? "Abertos" : f === "pending" ? "Pendentes" : "Resolvidos"}
+                {f === "all"
+                  ? "Todos"
+                  : f === "unread"
+                    ? "Não lidas"
+                    : f === "open"
+                      ? "Abertos"
+                      : f === "pending"
+                        ? "Pendentes"
+                        : "Resolvidos"}
+                {f === "unread" && unreadConvCount > 0 && (
+                  <span className={`ml-0.5 rounded-full px-1.5 h-4 min-w-4 inline-flex items-center justify-center text-[10px] font-semibold ${
+                    filter === f ? "bg-primary-foreground/20 text-primary-foreground" : "bg-emerald-500 text-white"
+                  }`}>
+                    {unreadConvCount}
+                  </span>
+                )}
               </button>
             ))}
           </div>
+          {unreadTotal > 0 && (
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              {unreadConvCount} {unreadConvCount === 1 ? "conversa" : "conversas"} · {unreadTotal} {unreadTotal === 1 ? "mensagem não lida" : "mensagens não lidas"}
+            </div>
+          )}
         </div>
         <ScrollArea className="flex-1">
           {filtered.length === 0 ? (

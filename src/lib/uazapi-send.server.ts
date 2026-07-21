@@ -31,8 +31,12 @@ export async function sendTextViaUazapi(
     token,
     body: { number: phone, text: params.text, replyid: reply?.shortId },
   });
-  const externalId: string | null =
+  const rawExternalId: string | null =
     res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
+  // Normaliza pra bater com o que o webhook/sync vão gravar depois
+  const externalId: string | null = rawExternalId
+    ? (String(rawExternalId).match(/^\d+:(.+)$/)?.[1] ?? String(rawExternalId))
+    : null;
 
   const { data: inserted, error: insErr } = await supabaseAdmin
     .from("messages")

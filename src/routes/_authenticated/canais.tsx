@@ -154,6 +154,24 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
+function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
+  const Icon = iconFor(channel.type);
+  const disconnectFn = useServerFn(disconnectUazapiInstance);
+  const statusFn = useServerFn(getUazapiStatus);
+  const syncFn = useServerFn(syncUazapiHistory);
+
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleDisconnect = async () => {
+    setBusy(true);
+    try {
+      await disconnectFn({ data: { channelId: channel.id } });
+      toast.success("Desconectado");
+      onChanged();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
   const handleRefresh = async () => {
     setBusy(true);
     try {
@@ -161,6 +179,11 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
       onChanged();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
+  };
+  const handleSync = async () => {
+    setSyncing(true);
+    try { await runFullSync(channel.id, syncFn); onChanged(); }
+    finally { setSyncing(false); }
   };
 
   return (
@@ -181,9 +204,15 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
             <QrCode className="w-4 h-4 mr-2" /> Conectar
           </Button>
         ) : (
-          <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={handleDisconnect} disabled={busy}>
-            <Power className="w-4 h-4 mr-2" /> Desconectar
-          </Button>
+          <>
+            <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={handleSync} disabled={busy || syncing}>
+              {syncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              Sincronizar histórico
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDisconnect} disabled={busy || syncing} title="Desconectar">
+              <Power className="w-4 h-4" />
+            </Button>
+          </>
         )}
         <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={busy} title="Atualizar status">
           <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />

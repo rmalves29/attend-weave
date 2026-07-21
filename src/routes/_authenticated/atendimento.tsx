@@ -256,8 +256,12 @@ function AtendimentoPage() {
                 <button
                   key={c.id}
                   onClick={() => openConversation(c.id)}
-                  className={`w-full text-left px-3 py-3 flex gap-3 border-b border-border/50 hover:bg-accent transition-colors relative ${
-                    selectedId === c.id ? "bg-accent" : isUnread ? "bg-primary/5" : ""
+                  className={`w-full text-left px-3 py-3 flex gap-3 border-b border-border/50 transition-colors relative ${
+                    selectedId === c.id
+                      ? "bg-accent"
+                      : isUnread
+                        ? "bg-primary/10 hover:bg-primary/[0.14]"
+                        : "hover:bg-accent"
                   }`}
                 >
                   {isUnread && (

@@ -492,6 +492,7 @@ export const forwardUazapiMessage = createServerFn({ method: "POST" })
         token, body: { number: phone, text },
       });
       externalId = res?.messageid ?? res?.id ?? null;
+      if (externalId) externalId = String(externalId).match(/^\d+:(.+)$/)?.[1] ?? String(externalId);
       previewContent = text;
 
       await supabaseAdmin.from("messages").insert({

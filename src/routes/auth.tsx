@@ -89,7 +89,7 @@ function AuthPage() {
                   <Label htmlFor="pw-in">Senha</Label>
                   <Input id="pw-in" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
-                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" disabled={loading}>
+                <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Entrar"}
                 </Button>
               </form>

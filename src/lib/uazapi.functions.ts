@@ -615,9 +615,9 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       let chats: any[] = [];
       try {
         const seenChats = new Set<string>();
-        const CHAT_PAGE = 200;
+        const CHAT_PAGE = 100;
         let chatOffset = 0;
-        while (chatOffset < 5000) {
+        while (chatOffset < 20_000) {
           const res = await uazapiFetch("/chat/find", {
             token,
             body: { operator: "AND", sort: "-wa_lastMsgTimestamp", limit: CHAT_PAGE, offset: chatOffset },
@@ -631,25 +631,49 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
               chats.push(chat);
             }
           }
-          chatOffset += page.length;
-          if (page.length < CHAT_PAGE) break;
+          const nextChatOffset = chatOffset + page.length;
+          const totalRecords = Number(res?.pagination?.totalRecords);
+          if (nextChatOffset <= chatOffset) break;
+          chatOffset = nextChatOffset;
+          if (Number.isFinite(totalRecords) && chatOffset >= totalRecords) break;
         }
 
-        // /group/list é a fonte explícita de todos os grupos e inclui grupos
-        // sem mensagens recentes, que podem não aparecer em /chat/find.
+        // /group/list é a fonte explícita de todos os grupos. A versão POST
+        // permite paginação e evita perder grupos quando a conta possui mais
+        // registros do que o limite aplicado pela API.
         try {
-          const groupRes = await uazapiFetch("/group/list?force=false&noparticipants=true", { token });
-          const groups = Array.isArray(groupRes) ? groupRes : groupRes?.groups ?? groupRes?.data ?? [];
-          for (const group of groups) {
-            const groupJid = group?.JID ?? group?.jid ?? group?.groupjid ?? group?.id;
-            if (!groupJid || seenChats.has(groupJid)) continue;
-            seenChats.add(groupJid);
-            chats.push({
-              ...group,
-              wa_chatid: groupJid,
-              wa_isGroup: true,
-              wa_name: group?.Name ?? group?.name ?? group?.subject ?? "",
+          const GROUP_PAGE = 1000;
+          let groupOffset = 0;
+          while (groupOffset < 20_000) {
+            const groupRes = await uazapiFetch("/group/list", {
+              token,
+              body: {
+                limit: GROUP_PAGE,
+                offset: groupOffset,
+                force: !data.cursor && groupOffset === 0,
+                noParticipants: true,
+              },
             });
+            const groups = Array.isArray(groupRes)
+              ? groupRes
+              : groupRes?.groups ?? groupRes?.data?.groups ?? groupRes?.data ?? [];
+            if (!groups.length) break;
+            for (const group of groups) {
+              const groupJid = group?.JID ?? group?.jid ?? group?.groupjid ?? group?.id;
+              if (!groupJid || seenChats.has(groupJid)) continue;
+              seenChats.add(groupJid);
+              chats.push({
+                ...group,
+                wa_chatid: groupJid,
+                wa_isGroup: true,
+                wa_name: group?.Name ?? group?.name ?? group?.subject ?? "",
+              });
+            }
+            const nextGroupOffset = groupOffset + groups.length;
+            const totalGroups = Number(groupRes?.pagination?.totalRecords);
+            if (nextGroupOffset <= groupOffset) break;
+            groupOffset = nextGroupOffset;
+            if (Number.isFinite(totalGroups) && groupOffset >= totalGroups) break;
           }
         } catch (e) {
           console.warn("[uazapi sync] group/list falhou:", (e as Error).message);

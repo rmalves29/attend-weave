@@ -22,21 +22,25 @@ import {
   disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
 } from "@/lib/uazapi.functions";
 
+type SyncCursor = { channelIndex: number; chatIndex: number; messageOffset: number };
+const channelSyncCursors = new Map<string, SyncCursor>();
+
 async function runFullSync(channelId: string, syncFn: any) {
   const toastId = toast.loading("Sincronizando conversas, grupos e mensagens…");
   let total = 0;
   let totalChats = 0;
   let historyRequested = 0;
   let webhookErrors = 0;
-  let cursor: { channelIndex: number; chatIndex: number; messageOffset: number } | undefined;
+  let cursor: SyncCursor | undefined = channelSyncCursors.get(channelId);
   try {
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 100; i++) {
       const r = await syncFn({ data: { channelId, perChatLimit: 10000, cursor } });
       total += r.ingested ?? 0;
       totalChats += r.chats ?? 0;
       historyRequested += r.historyRequested ?? 0;
       webhookErrors += r.webhookErrors ?? 0;
       if (!r.partial) {
+        channelSyncCursors.delete(channelId);
         const historySuffix = historyRequested > 0
           ? ` O WhatsApp ainda pode enviar histórico anterior de ${historyRequested} conversa(s).`
           : "";
@@ -51,6 +55,7 @@ async function runFullSync(channelId: string, syncFn: any) {
       }
       cursor = r.cursor ?? undefined;
       if (!cursor) break;
+      channelSyncCursors.set(channelId, cursor);
       toast.loading(`Sincronizando… ${totalChats} conversas processadas`, { id: toastId });
     }
     toast.info(

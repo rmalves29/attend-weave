@@ -54,7 +54,15 @@ type Conversation = {
   last_message_preview: string | null;
   unread_count: number;
   tags: string[];
-  contacts: { id: string; name: string; phone: string | null; email: string | null; avatar_url: string | null };
+  contacts: {
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    avatar_url: string | null;
+    external_id?: string | null;
+    metadata?: { whatsapp?: { is_group?: boolean; remote_jid?: string } } | null;
+  };
   channels: { id: string; name: string; type: "whatsapp" | "instagram" | "facebook" };
 };
 
@@ -99,10 +107,22 @@ const channelIcon = (type: string) => {
   return <MessageCircle className="w-3 h-3" />;
 };
 
+function isGroupConversation(conversation: Conversation): boolean {
+  const contact = conversation.contacts;
+  return conversation.channels?.type === "whatsapp" && Boolean(
+    contact?.metadata?.whatsapp?.is_group ||
+    contact?.metadata?.whatsapp?.remote_jid?.endsWith("@g.us") ||
+    contact?.external_id?.endsWith("@g.us") ||
+    contact?.phone?.endsWith("@g.us"),
+  );
+}
+
 function AtendimentoPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "unread" | "open" | "pending" | "resolved">("all");
+  const [filter, setFilter] = useState<
+    "all" | "unread" | "open" | "pending" | "resolved" | "groups"
+  >("all");
 
   const qc = useQueryClient();
 
@@ -130,35 +150,129 @@ function AtendimentoPage() {
   const { data: conversations = [], isFetching: isFetchingConvs, refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"],
     queryFn: async () => {
-      // Últimos 6 meses (baseado na última mensagem) — conversas mais antigas ficam de fora da lista.
-      const sixMonthsAgo = new Date(Date.now() - 183 * 24 * 60 * 60 * 1000).toISOString();
-      const { data, error } = await supabase
-        .from("conversations")
-        .select("*, contacts(*), channels(id,name,type,identifier,status)")
-        .gte("last_message_at", sixMonthsAgo)
-        .order("last_message_at", { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as Conversation[];
+      const PAGE_SIZE = 1000;
+      const allConversations: Conversation[] = [];
+
+      // O Data API pode limitar cada resposta a 1.000 registros. Busca em
+      // páginas para que a tela não pare silenciosamente nesse limite.
+      for (let page = 0; page < 100; page++) {
+        const from = page * PAGE_SIZE;
+        const { data, error } = await supabase
+          .from("conversations")
+          .select("*, contacts(*), channels(id,name,type,identifier,status)")
+          // Não limita por data: exibe todas as conversas importadas,
+          // inclusive antigas e grupos sem mensagens.
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+
+        const rows = (data ?? []) as unknown as Conversation[];
+        allConversations.push(...rows);
+        if (rows.length < PAGE_SIZE) break;
+      }
+
+      return allConversations;
     },
     refetchInterval: 10000,
     refetchOnWindowFocus: true,
   });
 
   const syncFn = useServerFn(syncUazapiHistory);
+  const syncCursorRef = useRef<{
+    channelIndex: number;
+    chatIndex: number;
+    messageOffset: number;
+  } | null>(null);
   const syncMutation = useMutation({
-    mutationFn: () => syncFn({ data: {} }),
+    mutationFn: async () => {
+      let cursor = syncCursorRef.current ?? undefined;
+      let totalIngested = 0;
+      let totalChats = 0;
+      let totalHistoryRequested = 0;
+      let totalWebhookErrors = 0;
+      let totalErrors = 0;
+      let groupsFound = 0;
+      let lastResult: Awaited<ReturnType<typeof syncFn>> | null = null;
+
+      // Continua automaticamente de onde a rajada anterior parou. Assim um
+      // único clique percorre todas as páginas de chats e mensagens.
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const result = await syncFn({
+          data: { perChatLimit: 10000, cursor },
+        });
+        lastResult = result;
+        totalIngested += result.ingested ?? 0;
+        totalChats += result.chats ?? 0;
+        totalHistoryRequested += result.historyRequested ?? 0;
+        totalWebhookErrors += result.webhookErrors ?? 0;
+        totalErrors += result.errors ?? 0;
+        groupsFound = Math.max(groupsFound, result.groups ?? 0);
+
+        if (!result.partial) {
+          syncCursorRef.current = null;
+          return {
+            ...result,
+            ingested: totalIngested,
+            chats: totalChats,
+            historyRequested: totalHistoryRequested,
+            webhookErrors: totalWebhookErrors,
+            errors: totalErrors,
+            groups: groupsFound,
+          };
+        }
+
+        cursor = result.cursor ?? undefined;
+        syncCursorRef.current = cursor ?? null;
+        if (!cursor) break;
+        toast.loading(
+          `Sincronizando… ${totalChats} conversas processadas e ${totalIngested} mensagens novas`,
+          { id: "whatsapp-history-sync" },
+        );
+      }
+
+      if (!lastResult) throw new Error("A sincronização não retornou resultado.");
+      return {
+        ...lastResult,
+        ingested: totalIngested,
+        chats: totalChats,
+        historyRequested: totalHistoryRequested,
+        webhookErrors: totalWebhookErrors,
+        errors: totalErrors,
+        groups: groupsFound,
+        partial: true as const,
+        cursor: syncCursorRef.current,
+      };
+    },
+    onMutate: () => {
+      toast.loading("Sincronizando conversas, grupos e mensagens…", { id: "whatsapp-history-sync" });
+    },
     onSuccess: (r) => {
+      syncCursorRef.current = r.partial ? (r.cursor ?? null) : null;
+      const suffix = (r.historyRequested ?? 0) > 0
+        ? ` O WhatsApp ainda pode enviar histórico anterior de ${r.historyRequested} conversa(s).`
+        : "";
+      const webhookWarning = (r.webhookErrors ?? 0) > 0
+        ? " Não foi possível atualizar o webhook; tente sincronizar novamente."
+        : "";
       if (r.partial) {
         toast.info(
-          `Sincronizado parcialmente: ${r.ingested} mensagens novas. Clique de novo para continuar.`,
+          `Sincronização avançou: ${r.ingested} mensagens novas e ${r.groups ?? 0} grupos encontrados. Clique novamente para continuar.${suffix}${webhookWarning}`,
+          { id: "whatsapp-history-sync", duration: 8000 },
         );
       } else {
-        toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+        toast.success(
+          `Sincronizado: ${r.ingested} mensagens novas e ${r.groups ?? 0} grupos encontrados.${suffix}${webhookWarning}`,
+          { id: "whatsapp-history-sync", duration: 8000 },
+        );
       }
       refetchConvs();
       if (selectedId) qc.invalidateQueries({ queryKey: ["messages"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Falha ao sincronizar"),
+    onError: (e: any) => toast.error(
+      e?.message ?? "Falha ao sincronizar",
+      { id: "whatsapp-history-sync" },
+    ),
   });
 
   const handleRefresh = () => {
@@ -168,7 +282,9 @@ function AtendimentoPage() {
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
-      if (filter === "unread") {
+      if (filter === "groups") {
+        if (!isGroupConversation(c)) return false;
+      } else if (filter === "unread") {
         if (!(c.unread_count > 0)) return false;
       } else if (filter !== "all" && c.status !== filter) return false;
       if (!search) return true;
@@ -183,6 +299,10 @@ function AtendimentoPage() {
   );
   const unreadConvCount = useMemo(
     () => conversations.filter((c) => c.unread_count > 0).length,
+    [conversations],
+  );
+  const groupCount = useMemo(
+    () => conversations.filter(isGroupConversation).length,
     [conversations],
   );
 
@@ -242,7 +362,7 @@ function AtendimentoPage() {
             />
           </div>
           <div className="flex gap-1 mt-3 text-xs flex-wrap">
-            {(["all", "unread", "open", "pending", "resolved"] as const).map((f) => (
+            {(["all", "unread", "open", "pending", "resolved", "groups"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -256,14 +376,23 @@ function AtendimentoPage() {
                     ? "Não lidas"
                     : f === "open"
                       ? "Abertos"
-                      : f === "pending"
-                        ? "Pendentes"
-                        : "Resolvidos"}
+                    : f === "pending"
+                      ? "Pendentes"
+                      : f === "resolved"
+                        ? "Resolvidos"
+                        : "Grupos"}
                 {f === "unread" && unreadConvCount > 0 && (
                   <span className={`ml-0.5 rounded-full px-1.5 h-4 min-w-4 inline-flex items-center justify-center text-[10px] font-semibold ${
                     filter === f ? "bg-primary-foreground/20 text-primary-foreground" : "bg-emerald-500 text-white"
                   }`}>
                     {unreadConvCount}
+                  </span>
+                )}
+                {f === "groups" && groupCount > 0 && (
+                  <span className={`ml-0.5 rounded-full px-1.5 h-4 min-w-4 inline-flex items-center justify-center text-[10px] font-semibold ${
+                    filter === f ? "bg-primary-foreground/20 text-primary-foreground" : "bg-emerald-500 text-white"
+                  }`}>
+                    {groupCount}
                   </span>
                 )}
               </button>
@@ -278,7 +407,7 @@ function AtendimentoPage() {
         <ScrollArea className="flex-1">
           {filtered.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
-              Nenhuma conversa encontrada.
+              {filter === "groups" ? "Nenhum grupo encontrado." : "Nenhuma conversa encontrada."}
             </div>
           ) : (
             filtered.map((c) => {

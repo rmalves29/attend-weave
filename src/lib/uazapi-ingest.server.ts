@@ -7,6 +7,201 @@ function extractPhone(jid?: string): string | null {
   return p && /^\d+$/.test(p) ? p : null;
 }
 
+function isGroupChat(jid?: string, value?: any): boolean {
+  return Boolean(jid?.includes("@g.us") || value?.wa_isGroup || value?.isGroup);
+}
+
+function chatAddress(jid?: string, value?: any): string | null {
+  if (!jid) return null;
+  return isGroupChat(jid, value) ? jid : extractPhone(jid);
+}
+
+function chatDisplayName(value: any, group: boolean, fallback: string): string {
+  const name = group
+    ? value?.Name ?? value?.name ?? value?.wa_name ?? value?.subject ?? value?.groupSubject
+    : value?.wa_contactName ?? value?.wa_name ?? value?.lead_name ?? value?.name;
+  return String(name ?? "").trim() || (group ? `Grupo ${fallback.split("@")[0]}` : fallback);
+}
+
+function chatTimestamp(value: any): string | null {
+  const raw = value?.wa_lastMsgTimestamp ?? value?.messageTimestamp ?? value?.timestamp ?? value?.t;
+  const timestamp = Number(raw);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  return new Date(timestamp > 1e12 ? timestamp : timestamp * 1000).toISOString();
+}
+
+type ConversationState = {
+  conversationId: string;
+  unread: number;
+  lastMessageAt: string | null;
+  status: string;
+  currentTags: string[];
+  botActive: boolean;
+  isNewConv: boolean;
+};
+
+async function ensureConversationBase(
+  sb: any,
+  channelId: string,
+  input: {
+    address: string;
+    remoteJid: string;
+    name?: string | null;
+    avatarUrl?: string | null;
+    isGroup: boolean;
+  },
+): Promise<ConversationState> {
+  let contactId: string;
+  const { data: existing, error: existingError } = await sb
+    .from("contacts")
+    .select("id, name, avatar_url, metadata")
+    .eq("phone", input.address)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  const whatsappMetadata = {
+    ...((existing?.metadata as any)?.whatsapp ?? {}),
+    remote_jid: input.remoteJid,
+    is_group: input.isGroup,
+  };
+
+  if (existing) {
+    contactId = existing.id;
+    const contactPatch: any = {
+      metadata: { ...((existing.metadata as any) ?? {}), whatsapp: whatsappMetadata },
+    };
+    if (
+      input.name &&
+      (input.isGroup || !existing.name || existing.name === input.address)
+    ) {
+      contactPatch.name = input.name;
+    }
+    if (input.avatarUrl && input.avatarUrl !== existing.avatar_url) {
+      contactPatch.avatar_url = input.avatarUrl;
+    }
+    const { error } = await sb.from("contacts").update(contactPatch).eq("id", contactId);
+    if (error) throw error;
+  } else {
+    const { data: created, error } = await sb
+      .from("contacts")
+      .insert({
+        name: input.name || input.address,
+        phone: input.address,
+        avatar_url: input.avatarUrl || null,
+        source_channel_id: channelId,
+        external_id: input.remoteJid,
+        metadata: { whatsapp: whatsappMetadata },
+      })
+      .select("id")
+      .single();
+    if (error && (error as any).code === "23505") {
+      const { data: winner, error: winnerError } = await sb
+        .from("contacts")
+        .select("id")
+        .eq("phone", input.address)
+        .single();
+      if (winnerError || !winner) throw winnerError ?? error;
+      contactId = winner.id;
+    } else if (error) {
+      throw error;
+    } else {
+      contactId = created.id;
+    }
+  }
+
+  const { data: conv, error: conversationError } = await sb
+    .from("conversations")
+    .select("id, unread_count, status, last_message_at, tags, bot_active")
+    .eq("contact_id", contactId)
+    .eq("channel_id", channelId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (conversationError) throw conversationError;
+
+  if (conv) {
+    return {
+      conversationId: conv.id,
+      unread: conv.unread_count ?? 0,
+      lastMessageAt: conv.last_message_at ?? null,
+      status: conv.status,
+      currentTags: conv.tags ?? [],
+      botActive: Boolean(conv.bot_active),
+      isNewConv: false,
+    };
+  }
+
+  const { data: createdConv, error: createError } = await sb
+    .from("conversations")
+    .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
+    .select("id")
+    .single();
+  if (createError && (createError as any).code === "23505") {
+    const { data: winner, error: winnerError } = await sb
+      .from("conversations")
+      .select("id, unread_count, status, last_message_at, tags, bot_active")
+      .eq("contact_id", contactId)
+      .eq("channel_id", channelId)
+      .single();
+    if (winnerError || !winner) throw winnerError ?? createError;
+    return {
+      conversationId: winner.id,
+      unread: winner.unread_count ?? 0,
+      lastMessageAt: winner.last_message_at ?? null,
+      status: winner.status,
+      currentTags: winner.tags ?? [],
+      botActive: Boolean(winner.bot_active),
+      isNewConv: false,
+    };
+  }
+  if (createError || !createdConv) throw createError ?? new Error("Falha ao criar conversa");
+
+  return {
+    conversationId: createdConv.id,
+    unread: 0,
+    lastMessageAt: null,
+    status: "open",
+    currentTags: [],
+    botActive: false,
+    isNewConv: true,
+  };
+}
+
+// Garante que todo chat retornado pela uazapi apareça na lista, mesmo que
+// ainda não haja mensagens locais para ele. Também preserva o JID completo
+// dos grupos para que respostas sejam enviadas ao destino correto.
+export async function ensureChatConversation(sb: any, channelId: string, chat: any) {
+  const remoteJid: string | undefined =
+    chat?.wa_chatid ?? chat?.chatid ?? chat?.JID ?? chat?.groupjid ?? chat?.jid ?? chat?.remoteJid;
+  const group = isGroupChat(remoteJid, chat);
+  const address = chatAddress(remoteJid, chat);
+  if (!remoteJid || !address || remoteJid.includes("@broadcast") || remoteJid === "status@broadcast") {
+    return null;
+  }
+
+  const state = await ensureConversationBase(sb, channelId, {
+    address,
+    remoteJid,
+    name: chatDisplayName(chat, group, address),
+    avatarUrl: chat?.image ?? chat?.imagePreview ?? chat?.PictureUrl ?? null,
+    isGroup: group,
+  });
+
+  const lastMessageAt = chatTimestamp(chat);
+  const preview = String(
+    chat?.wa_lastMessageTextVote ?? chat?.lastMessagePreview ?? chat?.lastMessage ?? "",
+  ).trim();
+  if (lastMessageAt && (!state.lastMessageAt || lastMessageAt > state.lastMessageAt)) {
+    const patch: any = { last_message_at: lastMessageAt };
+    if (preview) patch.last_message_preview = preview.slice(0, 120);
+    const { error } = await sb.from("conversations").update(patch).eq("id", state.conversationId);
+    if (error) throw error;
+    state.lastMessageAt = lastMessageAt;
+  }
+
+  return { ...state, remoteJid, isGroup: group };
+}
+
 function extractText(m: any): string {
   return (
     m?.text ??
@@ -109,7 +304,7 @@ function normalizeExternalId(id: string | undefined | null): string | null {
   return m ? m[1] : trimmed;
 }
 
-export async function ingestMessage(sb: any, channelId: string, m: any) {
+export async function ingestMessage(sb: any, channelId: string, m: any, chat?: any): Promise<boolean> {
   const key = m?.key ?? m;
   const remoteJid: string | undefined =
     key?.remoteJid ?? m?.remoteJid ?? m?.chatid ?? m?.chatId ?? m?.from ?? m?.sender ?? m?.jid;
@@ -120,9 +315,11 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   const pushName: string | undefined = m?.pushName ?? m?.senderName ?? m?.name ?? m?.sender_name;
   const timestamp: number | undefined = m?.messageTimestamp ?? m?.timestamp ?? m?.t;
 
-  const phone = extractPhone(remoteJid);
-  if (!phone) return;
-  if (remoteJid?.includes("@g.us")) return; // ignora grupos
+  const group = isGroupChat(remoteJid, m);
+  const phone = chatAddress(remoteJid, m);
+  if (!remoteJid || !phone || remoteJid.includes("@broadcast") || remoteJid === "status@broadcast") {
+    return false;
+  }
 
   if (externalId) {
     const { data: dup } = await sb
@@ -130,7 +327,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
       .select("id")
       .eq("external_id", externalId)
       .maybeSingle();
-    if (dup) return;
+    if (dup) return false;
   }
 
 
@@ -139,7 +336,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   const isMedia = media.type !== null;
 
   // Se não é mídia e não tem texto, ignora
-  if (!isMedia && !caption) return;
+  if (!isMedia && !caption) return false;
 
   const msgType = isMedia ? media.type! : "text";
   const previewLabel =
@@ -154,106 +351,34 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
             : "";
   const content = caption || previewLabel || "[mídia]";
 
-  // Contato único por telefone (índice contacts_phone_unique).
-  // Em caso de race entre webhooks paralelos, o INSERT perde pro índice
-  // único (23505) e re-busca o vencedor.
-  // IMPORTANTE: pushName em mensagens outbound (fromMe) é o dono da conta,
-  // não o cliente. Só usamos pushName quando a mensagem é inbound.
-  const contactName = !fromMe && pushName ? pushName : null;
-  let contactId: string;
-  const { data: existing } = await sb
-    .from("contacts")
-    .select("id, name")
-    .eq("phone", phone)
-    .maybeSingle();
-  if (existing) {
-    contactId = existing.id;
-    // Atualiza nome se o atual é só o telefone e agora temos um nome real
-    if (contactName && (!existing.name || existing.name === phone)) {
-      await sb.from("contacts").update({ name: contactName }).eq("id", contactId);
-    }
-  } else {
-    const { data: created, error } = await sb
-      .from("contacts")
-      .insert({
-        name: contactName || phone,
-        phone,
-        source_channel_id: channelId,
-        external_id: remoteJid,
-      })
-      .select("id")
-      .single();
-    if (error && (error as any).code === "23505") {
-      const { data: winner } = await sb.from("contacts").select("id").eq("phone", phone).single();
-      contactId = winner.id;
-    } else if (error) {
-      throw error;
-    } else {
-      contactId = created.id;
-    }
-  }
+  const chatInfo = chat ?? m;
+  const contactName = group
+    ? chatDisplayName(chatInfo, true, phone)
+    : (!fromMe && pushName ? pushName : null);
+  const state = await ensureConversationBase(sb, channelId, {
+    address: phone,
+    remoteJid,
+    name: contactName,
+    avatarUrl: chatInfo?.image ?? chatInfo?.imagePreview ?? chatInfo?.PictureUrl ?? null,
+    isGroup: group,
+  });
 
-  // Modelo WhatsApp: UMA conversa por (contato + canal), pra sempre.
-  // Mensagem nova em conversa resolvida REABRE a mesma conversa
-  // (em vez de criar outra — que era o que duplicava as janelas).
-  let conversationId: string;
-  let unread = 0;
-  let lastMessageAt: string | null = null;
+  const conversationId = state.conversationId;
+  const unread = state.unread;
+  const lastMessageAt = state.lastMessageAt;
   let wasResolved = false;
-  let isNewConv = false;
-  let currentTags: string[] | null = null;
-  let botActive = false;
-  const { data: conv } = await sb
-    .from("conversations")
-    .select("id, unread_count, status, last_message_at, tags, bot_active")
-    .eq("contact_id", contactId)
-    .eq("channel_id", channelId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (conv) {
-    conversationId = conv.id;
-    unread = conv.unread_count ?? 0;
-    lastMessageAt = conv.last_message_at ?? null;
-    currentTags = conv.tags ?? [];
-    botActive = Boolean(conv.bot_active);
-    if (!fromMe && (conv.status === "resolved" || conv.status === "closed")) {
-      wasResolved = true;
-      await sb
-        .from("conversations")
-        .update({
-          status: "open",
-          resolved_at: null,
-          resolved_by: null,
-          last_opened_at: new Date().toISOString(),
-        })
-        .eq("id", conv.id);
-    }
-  } else {
-    isNewConv = true;
-    const { data: newConv, error } = await sb
+  if (!fromMe && (state.status === "resolved" || state.status === "closed")) {
+    wasResolved = true;
+    const { error } = await sb
       .from("conversations")
-      .insert({ contact_id: contactId, channel_id: channelId, status: "open" })
-      .select("id")
-      .single();
-    if (error && (error as any).code === "23505") {
-      const { data: winner } = await sb
-        .from("conversations")
-        .select("id, unread_count, last_message_at, tags, bot_active")
-        .eq("contact_id", contactId)
-        .eq("channel_id", channelId)
-        .single();
-      conversationId = winner.id;
-      unread = winner.unread_count ?? 0;
-      lastMessageAt = winner.last_message_at ?? null;
-      currentTags = winner.tags ?? [];
-      botActive = Boolean(winner.bot_active);
-      isNewConv = false;
-    } else if (error) {
-      throw error;
-    } else {
-      conversationId = newConv.id;
-    }
+      .update({
+        status: "open",
+        resolved_at: null,
+        resolved_by: null,
+        last_opened_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
+    if (error) throw error;
   }
 
   if (!fromMe) {
@@ -277,6 +402,15 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
     status: "delivered",
     metadata: {
       raw: m,
+      ...(group
+        ? {
+            group: {
+              jid: remoteJid,
+              senderJid: key?.participant ?? m?.participant ?? m?.sender ?? null,
+              senderName: pushName ?? null,
+            },
+          }
+        : {}),
       ...(isMedia
         ? { media: { url: media.url, mimetype: media.mimetype, filename: media.filename } }
         : {}),
@@ -286,7 +420,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
 
   const { error: insertErr } = await sb.from("messages").insert(insertRow);
   if (insertErr && (insertErr as any).code !== "23505") throw insertErr;
-  if (insertErr) return;
+  if (insertErr) return false;
 
   // Mensagem histórica (sync manual ou /message/history-sync reenvia antigas
   // em rajada): não conta como não-lida nem sobrescreve o preview se a
@@ -306,7 +440,7 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
   }
 
   // Chatbot de boas-vindas: só para inbound real (não histórico) e texto.
-  if (!fromMe && !isHistorical) {
+  if (!group && !fromMe && !isHistorical) {
     try {
       const { data: channelRow } = await sb
         .from("channels").select("credentials").eq("id", channelId).single();
@@ -318,9 +452,9 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
           channelId,
           phone,
           incomingText: caption || "",
-          shouldGreet: isNewConv || wasResolved,
-          currentTags,
-          botActive,
+          shouldGreet: state.isNewConv || wasResolved,
+          currentTags: state.currentTags,
+          botActive: state.botActive,
           token,
         });
       }
@@ -328,4 +462,5 @@ export async function ingestMessage(sb: any, channelId: string, m: any) {
       console.error("[welcome-bot] erro:", (e as Error).message);
     }
   }
+  return true;
 }

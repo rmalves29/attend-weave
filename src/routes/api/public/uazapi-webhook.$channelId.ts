@@ -82,6 +82,17 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           return new Response("ok");
         }
 
+        // Mantém novos grupos, renomeações e atualizações de chats visíveis
+        // mesmo antes de chegar uma mensagem nova.
+        if (eventLower.includes("group") || eventLower === "chats" || eventLower === "chat") {
+          const { ensureChatConversation } = await import("@/lib/uazapi-ingest.server");
+          for (const chat of extractChats(payload)) {
+            try { await ensureChatConversation(supabaseAdmin, channelId, chat); }
+            catch (e) { console.error("[uazapi webhook] ensure chat err:", e); }
+          }
+          return new Response("ok");
+        }
+
         // Mensagens
         const { ingestMessage } = await import("@/lib/uazapi-ingest.server");
         const messages = extractMessages(payload);
@@ -150,6 +161,7 @@ function looksLikeMessage(value: any): boolean {
 
 function extractMessages(payload: any): any[] {
   const candidates = [
+    ...toMessageArray(payload?.data?.history),
     ...toMessageArray(payload?.data?.messages),
     ...toMessageArray(payload?.data?.message),
     ...toMessageArray(payload?.data),
@@ -158,10 +170,34 @@ function extractMessages(payload: any): any[] {
     ...toMessageArray(payload?.event?.messages),
     ...toMessageArray(payload?.event?.message),
     ...toMessageArray(payload?.event?.data),
+    ...toMessageArray(payload?.history),
   ];
   const messages = candidates.filter(looksLikeMessage);
   if (!messages.length && looksLikeMessage(payload)) return [payload];
   return messages;
+}
+
+function looksLikeChat(value: any): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Boolean(
+    value.wa_chatid || value.chatid || value.JID || value.groupjid || value.jid || value.remoteJid,
+  );
+}
+
+function extractChats(payload: any): any[] {
+  const candidates = [
+    ...toMessageArray(payload?.data?.groups),
+    ...toMessageArray(payload?.data?.group),
+    ...toMessageArray(payload?.data?.chats),
+    ...toMessageArray(payload?.data?.chat),
+    ...toMessageArray(payload?.data),
+    ...toMessageArray(payload?.groups),
+    ...toMessageArray(payload?.group),
+    ...toMessageArray(payload?.chats),
+    ...toMessageArray(payload?.chat),
+    ...toMessageArray(payload?.event?.data),
+  ];
+  return candidates.filter(looksLikeChat);
 }
 
 function mapAckStatus(raw: any): "sent" | "delivered" | "read" | "failed" | null {

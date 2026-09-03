@@ -282,11 +282,17 @@ function AtendimentoPage() {
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
+      const isGroup = isGroupConversation(c);
       if (filter === "groups") {
-        if (!isGroupConversation(c)) return false;
-      } else if (filter === "unread") {
-        if (!(c.unread_count > 0)) return false;
-      } else if (filter !== "all" && c.status !== filter) return false;
+        if (!isGroup) return false;
+      } else {
+        // Grupos ficam isolados no filtro próprio e nunca aparecem misturados
+        // às filas de atendimento individual.
+        if (isGroup) return false;
+        if (filter === "unread") {
+          if (!(c.unread_count > 0)) return false;
+        } else if (filter !== "all" && c.status !== filter) return false;
+      }
       if (!search) return true;
       const q = search.toLowerCase();
       return c.contacts?.name?.toLowerCase().includes(q) || c.last_message_preview?.toLowerCase().includes(q);
@@ -294,11 +300,16 @@ function AtendimentoPage() {
   }, [conversations, search, filter]);
 
   const unreadTotal = useMemo(
-    () => conversations.reduce((sum, c) => sum + (c.unread_count > 0 ? c.unread_count : 0), 0),
+    () => conversations.reduce(
+      (sum, c) => sum + (!isGroupConversation(c) && c.unread_count > 0 ? c.unread_count : 0),
+      0,
+    ),
     [conversations],
   );
   const unreadConvCount = useMemo(
-    () => conversations.filter((c) => c.unread_count > 0).length,
+    () => conversations.filter(
+      (c) => !isGroupConversation(c) && c.unread_count > 0,
+    ).length,
     [conversations],
   );
   const groupCount = useMemo(

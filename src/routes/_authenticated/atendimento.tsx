@@ -135,7 +135,9 @@ function AtendimentoPage() {
       const { data, error } = await supabase
         .from("conversations")
         .select("*, contacts(*), channels(id,name,type,identifier,status)")
-        .gte("last_message_at", sixMonthsAgo)
+        // Conversas importadas de grupos podem ainda não ter mensagem local.
+        // Mantê-las visíveis permite abrir e responder ao grupo imediatamente.
+        .or(`last_message_at.gte.${sixMonthsAgo},last_message_at.is.null`)
         .order("last_message_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as unknown as Conversation[];
@@ -145,20 +147,44 @@ function AtendimentoPage() {
   });
 
   const syncFn = useServerFn(syncUazapiHistory);
+  const syncCursorRef = useRef<{
+    channelIndex: number;
+    chatIndex: number;
+    messageOffset: number;
+  } | null>(null);
   const syncMutation = useMutation({
-    mutationFn: () => syncFn({ data: {} }),
+    mutationFn: () => syncFn({
+      data: { cursor: syncCursorRef.current ?? undefined },
+    }),
+    onMutate: () => {
+      toast.loading("Sincronizando conversas, grupos e mensagens…", { id: "whatsapp-history-sync" });
+    },
     onSuccess: (r) => {
+      syncCursorRef.current = r.partial ? (r.cursor ?? null) : null;
+      const suffix = (r.historyRequested ?? 0) > 0
+        ? ` O WhatsApp ainda pode enviar histórico anterior de ${r.historyRequested} conversa(s).`
+        : "";
+      const webhookWarning = (r.webhookErrors ?? 0) > 0
+        ? " Não foi possível atualizar o webhook; tente sincronizar novamente."
+        : "";
       if (r.partial) {
         toast.info(
-          `Sincronizado parcialmente: ${r.ingested} mensagens novas. Clique de novo para continuar.`,
+          `Sincronização avançou: ${r.ingested} mensagens novas e ${r.groups ?? 0} grupos encontrados. Clique novamente para continuar.${suffix}${webhookWarning}`,
+          { id: "whatsapp-history-sync", duration: 8000 },
         );
       } else {
-        toast.success(`Sincronizado: ${r.ingested} mensagens novas`);
+        toast.success(
+          `Sincronizado: ${r.ingested} mensagens novas e ${r.groups ?? 0} grupos encontrados.${suffix}${webhookWarning}`,
+          { id: "whatsapp-history-sync", duration: 8000 },
+        );
       }
       refetchConvs();
       if (selectedId) qc.invalidateQueries({ queryKey: ["messages"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Falha ao sincronizar"),
+    onError: (e: any) => toast.error(
+      e?.message ?? "Falha ao sincronizar",
+      { id: "whatsapp-history-sync" },
+    ),
   });
 
   const handleRefresh = () => {

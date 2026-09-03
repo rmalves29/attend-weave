@@ -23,20 +23,42 @@ import {
 } from "@/lib/uazapi.functions";
 
 async function runFullSync(channelId: string, syncFn: any) {
-  toast.info("Sincronizando histórico completo… isso pode levar alguns minutos.");
+  const toastId = toast.loading("Sincronizando conversas, grupos e mensagens…");
   let total = 0;
+  let totalChats = 0;
+  let historyRequested = 0;
+  let webhookErrors = 0;
+  let cursor: { channelIndex: number; chatIndex: number; messageOffset: number } | undefined;
   try {
     for (let i = 0; i < 40; i++) {
-      const r = await syncFn({ data: { channelId, perChatLimit: 10000 } });
-      total = r.ingested ?? total;
+      const r = await syncFn({ data: { channelId, perChatLimit: 10000, cursor } });
+      total += r.ingested ?? 0;
+      totalChats += r.chats ?? 0;
+      historyRequested += r.historyRequested ?? 0;
+      webhookErrors += r.webhookErrors ?? 0;
       if (!r.partial) {
-        toast.success(`Histórico sincronizado: ${r.ingested} mensagens em ${r.chats} conversas`);
+        const historySuffix = historyRequested > 0
+          ? ` O WhatsApp ainda pode enviar histórico anterior de ${historyRequested} conversa(s).`
+          : "";
+        const webhookSuffix = webhookErrors > 0
+          ? " Não foi possível atualizar o webhook; tente novamente antes de fechar o WhatsApp no celular."
+          : "";
+        toast.success(
+          `Sincronizado: ${total} mensagens novas em ${totalChats} conversas; ${r.groups ?? 0} grupos encontrados.${historySuffix}${webhookSuffix}`,
+          { id: toastId, duration: 8000 },
+        );
         return;
       }
+      cursor = r.cursor ?? undefined;
+      if (!cursor) break;
+      toast.loading(`Sincronizando… ${totalChats} conversas processadas`, { id: toastId });
     }
-    toast.success(`Sincronização parcial concluída: ${total} mensagens (execute novamente para continuar)`);
+    toast.info(
+      `Sincronização parcial: ${total} mensagens novas. Clique novamente para continuar.`,
+      { id: toastId, duration: 8000 },
+    );
   } catch (e: any) {
-    toast.error(e?.message ?? "Falha ao sincronizar histórico");
+    toast.error(e?.message ?? "Falha ao sincronizar histórico", { id: toastId });
   }
 }
 
@@ -266,21 +288,12 @@ function QrDialog({ channel, onOpenChange }: any) {
     setQr(channel.qr_code ?? null);
     let cancelled = false;
     let syncStarted = false;
-    const triggerFullSync = async () => {
+    const triggerFullSync = () => {
       if (syncStarted) return;
       syncStarted = true;
-      toast.info("Carregando histórico completo do número. Isso pode levar alguns minutos…");
-      try {
-        // Roda em rajadas até esgotar — a função retorna parcial quando
-        // atinge o orçamento de tempo; nesse caso, chama de novo.
-        for (let i = 0; i < 20; i++) {
-          const r = await syncFn({ data: { channelId: channel.id, perChatLimit: 10000 } });
-          if (!r.partial) { toast.success(`Histórico sincronizado: ${r.ingested} mensagens`); break; }
-          if (cancelled) return;
-        }
-      } catch (e: any) {
-        toast.error(e?.message ?? "Falha ao sincronizar histórico");
-      }
+      // A sincronização continua mesmo quando o diálogo fecha após conectar.
+      // runFullSync mantém o cursor entre rajadas e publica o progresso no toast.
+      void runFullSync(channel.id, syncFn);
     };
     (async () => {
       setLoading(true);

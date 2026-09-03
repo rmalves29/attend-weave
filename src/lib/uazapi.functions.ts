@@ -81,6 +81,29 @@ function webhookUrlFor(channelId: string) {
   return `${base}/api/public/uazapi-webhook/${channelId}`;
 }
 
+const UAZAPI_WEBHOOK_EVENTS = [
+  "history",
+  "messages",
+  "messages_update",
+  "connection",
+  "groups",
+  "chats",
+];
+
+async function configureUazapiWebhook(channelId: string, token: string) {
+  return uazapiFetch("/webhook", {
+    token,
+    body: {
+      url: webhookUrlFor(channelId),
+      enabled: true,
+      events: UAZAPI_WEBHOOK_EVENTS,
+      excludeMessages: [],
+      addUrlEvents: false,
+      addUrlTypesMessages: false,
+    },
+  });
+}
+
 // ---------- create ----------
 export const createUazapiInstance = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -116,16 +139,7 @@ export const createUazapiInstance = createServerFn({ method: "POST" })
 
     // 3. configura webhook (best-effort — não bloqueia se falhar)
     try {
-      await uazapiFetch("/webhook", {
-        token: instanceToken,
-        body: {
-          url: webhookUrlFor(channel.id),
-          enabled: true,
-          events: ["messages", "messages_update", "connection", "qrcode"],
-          excludeMessages: [],
-          addUrlEvents: false,
-        },
-      });
+      await configureUazapiWebhook(channel.id, instanceToken);
     } catch (e) {
       console.warn("[uazapi] webhook setup falhou:", (e as Error).message);
     }
@@ -142,6 +156,14 @@ export const connectUazapiInstance = createServerFn({ method: "POST" })
     const { channel, supabaseAdmin } = await loadChannelWithCreds(data.channelId);
     const token = (channel.credentials as any)?.token;
     if (!token) throw new Error("Instância sem token uazapi");
+
+    // Reaplica a configuração para instâncias antigas que foram criadas sem
+    // os eventos `history`, `groups` e `chats`.
+    try {
+      await configureUazapiWebhook(data.channelId, token);
+    } catch (e) {
+      console.warn("[uazapi] webhook setup falhou ao conectar:", (e as Error).message);
+    }
 
     const res = await uazapiFetch("/instance/connect", { token, body: {} });
     const qr: string | undefined = res?.instance?.qrcode ?? res?.qrcode ?? res?.qr;
@@ -517,43 +539,79 @@ export const forwardUazapiMessage = createServerFn({ method: "POST" })
   });
 
 // ---------- sync history ----------
-// Puxa TODO o histórico disponível de cada chat via uazapi:
-// 1) lista chats (/chat/find)
-// 2) por chat pagina /message/find até esgotar (ou atingir o teto de segurança)
-// Fallback: se /chat/find falhar, cai num /message/find global recente.
+// Importa os chats e o histórico local da uazapi em blocos retomáveis. O
+// cursor evita que cada chamada recomece do primeiro chat e nunca alcance os
+// mais antigos. Grupos também são materializados como conversas e mantêm o
+// JID completo (`@g.us`) como endereço de envio.
 export const syncUazapiHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
     channelId: z.string().uuid().optional(),
     perChatLimit: z.number().int().min(1).max(10000).optional(),
+    cursor: z.object({
+      channelIndex: z.number().int().min(0),
+      chatIndex: z.number().int().min(0),
+      messageOffset: z.number().int().min(0),
+    }).optional(),
   }))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { ingestMessage } = await import("./uazapi-ingest.server");
+    const { ensureChatConversation, ingestMessage } = await import("./uazapi-ingest.server");
 
-    const q = supabaseAdmin.from("channels").select("*").eq("type", "whatsapp");
+    const q = supabaseAdmin
+      .from("channels")
+      .select("*")
+      .eq("type", "whatsapp")
+      .order("created_at", { ascending: true });
     if (data.channelId) q.eq("id", data.channelId);
     const { data: channels, error } = await q;
     if (error) throw new Error(error.message);
 
-    const perChatCap = data.perChatLimit ?? 2000; // teto por chat
+    const perChatCap = data.perChatLimit ?? 2000;
     const PAGE = 200;
-    // Orçamento de tempo: histórico completo de muitos chats leva minutos —
-    // mais que o limite da plataforma e que a paciência do botão na UI.
-    // Retorna parcial; o dedup por external_id torna re-execuções baratas.
-    const deadline = Date.now() + 40_000;
+    const deadline = Date.now() + 20_000;
     const outOfTime = () => Date.now() > deadline;
-    let partial = false;
     let ingested = 0;
     let errors = 0;
     let chatsProcessed = 0;
+    let chatsFound = 0;
+    let groupsFound = 0;
+    let historyRequested = 0;
+    let webhookErrors = 0;
 
-    for (const ch of channels ?? []) {
+    const start = data.cursor ?? { channelIndex: 0, chatIndex: 0, messageOffset: 0 };
+    const partialResult = (channelIndex: number, chatIndex: number, messageOffset: number) => ({
+      ingested,
+      errors,
+      channels: channels?.length ?? 0,
+      chats: chatsProcessed,
+      chatsFound,
+      groups: groupsFound,
+      historyRequested,
+      webhookErrors,
+      partial: true as const,
+      cursor: { channelIndex, chatIndex, messageOffset },
+    });
+
+    for (let channelIndex = start.channelIndex; channelIndex < (channels?.length ?? 0); channelIndex++) {
+      const ch = channels![channelIndex];
       const token = (ch.credentials as any)?.token;
       if (!token) continue;
-      if (outOfTime()) { partial = true; break; }
+      const firstChatIndex = channelIndex === start.channelIndex ? start.chatIndex : 0;
+      const firstMessageOffset = channelIndex === start.channelIndex ? start.messageOffset : 0;
+      if (outOfTime()) return partialResult(channelIndex, firstChatIndex, firstMessageOffset);
 
-      // 1) tenta listar todos os chats disponíveis do número conectado
+      // Corrige automaticamente webhooks de instâncias já existentes. Sem o
+      // evento `history`, o endpoint history-sync aceita a solicitação, mas o
+      // AttendFlow nunca recebe as mensagens que chegam depois.
+      try {
+        await configureUazapiWebhook(ch.id, token);
+      } catch (e) {
+        webhookErrors++;
+        console.warn("[uazapi sync] webhook setup falhou:", (e as Error).message);
+      }
+
+      // Lista chats individuais e grupos conhecidos pela instância.
       let chats: any[] = [];
       try {
         const seenChats = new Set<string>();
@@ -576,13 +634,36 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
           chatOffset += page.length;
           if (page.length < CHAT_PAGE) break;
         }
+
+        // /group/list é a fonte explícita de todos os grupos e inclui grupos
+        // sem mensagens recentes, que podem não aparecer em /chat/find.
+        try {
+          const groupRes = await uazapiFetch("/group/list?force=false&noparticipants=true", { token });
+          const groups = Array.isArray(groupRes) ? groupRes : groupRes?.groups ?? groupRes?.data ?? [];
+          for (const group of groups) {
+            const groupJid = group?.JID ?? group?.jid ?? group?.groupjid ?? group?.id;
+            if (!groupJid || seenChats.has(groupJid)) continue;
+            seenChats.add(groupJid);
+            chats.push({
+              ...group,
+              wa_chatid: groupJid,
+              wa_isGroup: true,
+              wa_name: group?.Name ?? group?.name ?? group?.subject ?? "",
+            });
+          }
+        } catch (e) {
+          console.warn("[uazapi sync] group/list falhou:", (e as Error).message);
+        }
       } catch (e) {
         console.warn("[uazapi sync] chat/find falhou:", (e as Error).message);
       }
 
-      // 2) sem chats? faz um pull global recente
-      // /message/find não aceita operator/sort/filters (só /chat/find aceita) —
-      // sem chatid ele já retorna o feed geral, mais recente primeiro.
+      chatsFound += chats.length;
+      groupsFound += chats.filter((chat) =>
+        Boolean(chat?.wa_isGroup || chat?.isGroup || String(chat?.wa_chatid ?? chat?.JID ?? "").includes("@g.us")),
+      ).length;
+
+      // Se a listagem de chats falhar, ainda tenta importar o feed global.
       if (!chats.length) {
         try {
           const res = await uazapiFetch("/message/find", {
@@ -591,7 +672,9 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
           });
           const msgs = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
           for (const m of [...msgs].reverse()) {
-            try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
+            try {
+              if (await ingestMessage(supabaseAdmin, ch.id, m)) ingested++;
+            }
             catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
           }
         } catch (e) {
@@ -601,21 +684,31 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
         continue;
       }
 
-      // 3) por chat, pagina até esgotar (ignora grupos)
-      for (const chat of chats) {
-        if (outOfTime()) { partial = true; break; }
-        const chatid: string | undefined =
-          chat?.wa_chatid ?? chat?.chatid ?? chat?.id ?? chat?.jid ?? chat?.remoteJid;
-        if (!chatid || chatid.includes("@g.us")) continue;
+      for (let chatIndex = firstChatIndex; chatIndex < chats.length; chatIndex++) {
+        const chat = chats[chatIndex];
+        let offset = chatIndex === firstChatIndex ? firstMessageOffset : 0;
+        if (outOfTime()) return partialResult(channelIndex, chatIndex, offset);
 
-        let offset = 0;
-        let fetched = 0;
+        const chatid: string | undefined =
+          chat?.wa_chatid ?? chat?.chatid ?? chat?.JID ?? chat?.groupjid ?? chat?.jid ?? chat?.remoteJid;
+        if (
+          !chatid ||
+          chatid.includes("@broadcast") ||
+          chatid.includes("@newsletter")
+        ) continue;
+
+        try {
+          await ensureChatConversation(supabaseAdmin, ch.id, chat);
+        } catch (e) {
+          errors++;
+          console.error("[uazapi sync] ensure chat err:", chatid, (e as Error).message);
+        }
+
         let exhaustedLocally = false;
-        while (fetched < perChatCap && !outOfTime()) {
+        while (offset < perChatCap) {
+          if (outOfTime()) return partialResult(channelIndex, chatIndex, offset);
           let res: any;
           try {
-            // Filtro por conversa é o campo `chatid` direto no body — esse
-            // endpoint não tem operator/sort/filters como o /chat/find.
             res = await uazapiFetch("/message/find", {
               token,
               body: { chatid, limit: PAGE, offset },
@@ -627,30 +720,33 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
           }
           const page: any[] = Array.isArray(res) ? res : res?.messages ?? res?.data ?? [];
           if (!page.length) { exhaustedLocally = true; break; }
-          // ingere na ordem cronológica (mais antigo → mais novo)
           for (const m of [...page].reverse()) {
-            try { await ingestMessage(supabaseAdmin, ch.id, m); ingested++; }
+            try {
+              if (await ingestMessage(supabaseAdmin, ch.id, m, chat)) ingested++;
+            }
             catch (e) { errors++; console.error("[uazapi sync] ingest err:", (e as Error).message); }
           }
-          fetched += page.length;
           if (res?.hasMore === false) { exhaustedLocally = true; break; }
-          // API informa o próximo offset explicitamente — mais confiável que
-          // somar o tamanho da página (evita parar cedo ou duplicar).
-          offset = typeof res?.nextOffset === "number" ? res.nextOffset : offset + page.length;
+          const nextOffset = typeof res?.nextOffset === "number" ? res.nextOffset : offset + page.length;
+          if (nextOffset <= offset) {
+            errors++;
+            console.warn("[uazapi sync] paginação sem avanço:", chatid, offset, nextOffset);
+            break;
+          }
+          offset = nextOffset;
           if (res?.hasMore === undefined && page.length < PAGE) { exhaustedLocally = true; break; }
         }
         chatsProcessed++;
 
-        // Histórico local da instância esgotado: pede ao WhatsApp (celular
-        // conectado) pra sincronizar mensagens mais antigas. Assíncrono — as
-        // mensagens chegam depois via webhook (evento "history") e entram
-        // numa próxima sincronização. Best-effort, não conta como erro fatal.
+        // O histórico anterior ao cache local chega de forma assíncrona pelo
+        // evento `history`; por isso o webhook é reparado antes desta etapa.
         if (exhaustedLocally) {
           try {
             await uazapiFetch("/message/history-sync", {
               token,
               body: { number: chatid, mode: "history", count: 100 },
             });
+            historyRequested++;
           } catch (e) {
             console.warn("[uazapi sync] history-sync falhou:", chatid, (e as Error).message);
           }
@@ -658,8 +754,18 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       }
     }
 
-    if (outOfTime()) partial = true;
-    return { ingested, errors, channels: channels?.length ?? 0, chats: chatsProcessed, partial };
+    return {
+      ingested,
+      errors,
+      channels: channels?.length ?? 0,
+      chats: chatsProcessed,
+      chatsFound,
+      groups: groupsFound,
+      historyRequested,
+      webhookErrors,
+      partial: false as const,
+      cursor: null,
+    };
   });
 
 // ---------- get media URL for a message ----------

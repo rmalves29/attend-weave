@@ -17,6 +17,7 @@ import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authen
 import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
 import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
 import { Route as ApiPublicDispatchScheduledMessagesRouteImport } from './routes/api/public/dispatch-scheduled-messages'
+import { Route as ApiPublicAgendaSendRouteImport } from './routes/api/public/agenda-send'
 import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
 import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
 
@@ -62,6 +63,11 @@ const ApiPublicDispatchScheduledMessagesRoute =
     path: '/api/public/dispatch-scheduled-messages',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicAgendaSendRoute = ApiPublicAgendaSendRouteImport.update({
+  id: '/api/public/agenda-send',
+  path: '/api/public/agenda-send',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicUazapiWebhookChannelIdRoute =
   ApiPublicUazapiWebhookChannelIdRouteImport.update({
     id: '/api/public/uazapi-webhook/$channelId',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/_authenticated/canais': typeof AuthenticatedCanaisRoute
   '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
+    | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/_authenticated/canais'
     | '/_authenticated/configuracoes'
     | '/_authenticated/relatorios'
+    | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicAgendaSendRoute: typeof ApiPublicAgendaSendRoute
   ApiPublicDispatchScheduledMessagesRoute: typeof ApiPublicDispatchScheduledMessagesRoute
   ApiPublicMessageMediaMessageIdRoute: typeof ApiPublicMessageMediaMessageIdRoute
   ApiPublicUazapiWebhookChannelIdRoute: typeof ApiPublicUazapiWebhookChannelIdRoute
@@ -214,6 +227,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicDispatchScheduledMessagesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agenda-send': {
+      id: '/api/public/agenda-send'
+      path: '/api/public/agenda-send'
+      fullPath: '/api/public/agenda-send'
+      preLoaderRoute: typeof ApiPublicAgendaSendRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/uazapi-webhook/$channelId': {
       id: '/api/public/uazapi-webhook/$channelId'
       path: '/api/public/uazapi-webhook/$channelId'
@@ -252,6 +272,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicAgendaSendRoute: ApiPublicAgendaSendRoute,
   ApiPublicDispatchScheduledMessagesRoute:
     ApiPublicDispatchScheduledMessagesRoute,
   ApiPublicMessageMediaMessageIdRoute: ApiPublicMessageMediaMessageIdRoute,

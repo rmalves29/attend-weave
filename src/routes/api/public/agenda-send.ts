@@ -56,7 +56,7 @@ export const Route = createFileRoute("/api/public/agenda-send")({
           list.find(
             (c) =>
               typeof c.identifier === "string" &&
-              c.identifier.includes("947839826"),
+              c.identifier.includes("992904210"),
           ) ?? null;
 
         if (!channel) {

@@ -92,7 +92,8 @@ export const Route = createFileRoute("/api/public/agenda-send")({
         // Modo verificação: só consulta o status da instância, sem enviar nada.
         if (body.check === true) {
           try {
-            const status = await uazapiFetch("/instance/status", { token });
+            const res = await uazapiFetch("/instance/status", { token });
+            const src = (res?.instance ?? res ?? {}) as Record<string, unknown>;
             return json({
               ok: true,
               channel: {
@@ -101,7 +102,7 @@ export const Route = createFileRoute("/api/public/agenda-send")({
                 identifier: channel.identifier,
                 status: channel.status,
               },
-              uazapi_status: status,
+              uazapi_status: { status: src.status, profileName: src.profileName },
             });
           } catch (e) {
             console.error("[agenda-send] falha no status:", (e as Error).message);

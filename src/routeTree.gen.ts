@@ -9,41 +9,35 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
-import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
-import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
-import { Route as ApiPublicAgendaSendRouteImport } from './routes/api/public/agenda-send'
+import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
+import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
+import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
 import { Route as ApiPublicDispatchScheduledMessagesRouteImport } from './routes/api/public/dispatch-scheduled-messages'
-import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
+import { Route as ApiPublicAgendaSendRouteImport } from './routes/api/public/agenda-send'
 import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
+import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedAtendimentoRoute =
-  AuthenticatedAtendimentoRouteImport.update({
-    id: '/atendimento',
-    path: '/atendimento',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedCanaisRoute = AuthenticatedCanaisRouteImport.update({
-  id: '/canais',
-  path: '/canais',
+const AuthenticatedRelatoriosRoute = AuthenticatedRelatoriosRouteImport.update({
+  id: '/relatorios',
+  path: '/relatorios',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedConfiguracoesRoute =
@@ -52,32 +46,38 @@ const AuthenticatedConfiguracoesRoute =
     path: '/configuracoes',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedRelatoriosRoute = AuthenticatedRelatoriosRouteImport.update({
-  id: '/relatorios',
-  path: '/relatorios',
+const AuthenticatedCanaisRoute = AuthenticatedCanaisRouteImport.update({
+  id: '/canais',
+  path: '/canais',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicAgendaSendRoute = ApiPublicAgendaSendRouteImport.update({
-  id: '/api/public/agenda-send',
-  path: '/api/public/agenda-send',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const AuthenticatedAtendimentoRoute =
+  AuthenticatedAtendimentoRouteImport.update({
+    id: '/atendimento',
+    path: '/atendimento',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const ApiPublicDispatchScheduledMessagesRoute =
   ApiPublicDispatchScheduledMessagesRouteImport.update({
     id: '/api/public/dispatch-scheduled-messages',
     path: '/api/public/dispatch-scheduled-messages',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiPublicMessageMediaMessageIdRoute =
-  ApiPublicMessageMediaMessageIdRouteImport.update({
-    id: '/api/public/message-media/$messageId',
-    path: '/api/public/message-media/$messageId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const ApiPublicAgendaSendRoute = ApiPublicAgendaSendRouteImport.update({
+  id: '/api/public/agenda-send',
+  path: '/api/public/agenda-send',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicUazapiWebhookChannelIdRoute =
   ApiPublicUazapiWebhookChannelIdRouteImport.update({
     id: '/api/public/uazapi-webhook/$channelId',
     path: '/api/public/uazapi-webhook/$channelId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicMessageMediaMessageIdRoute =
+  ApiPublicMessageMediaMessageIdRouteImport.update({
+    id: '/api/public/message-media/$messageId',
+    path: '/api/public/message-media/$messageId',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -171,11 +171,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -185,25 +185,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/atendimento': {
-      id: '/_authenticated/atendimento'
-      path: '/atendimento'
-      fullPath: '/atendimento'
-      preLoaderRoute: typeof AuthenticatedAtendimentoRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/canais': {
-      id: '/_authenticated/canais'
-      path: '/canais'
-      fullPath: '/canais'
-      preLoaderRoute: typeof AuthenticatedCanaisRouteImport
+    '/_authenticated/relatorios': {
+      id: '/_authenticated/relatorios'
+      path: '/relatorios'
+      fullPath: '/relatorios'
+      preLoaderRoute: typeof AuthenticatedRelatoriosRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/configuracoes': {
@@ -213,19 +206,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConfiguracoesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/relatorios': {
-      id: '/_authenticated/relatorios'
-      path: '/relatorios'
-      fullPath: '/relatorios'
-      preLoaderRoute: typeof AuthenticatedRelatoriosRouteImport
+    '/_authenticated/canais': {
+      id: '/_authenticated/canais'
+      path: '/canais'
+      fullPath: '/canais'
+      preLoaderRoute: typeof AuthenticatedCanaisRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/public/agenda-send': {
-      id: '/api/public/agenda-send'
-      path: '/api/public/agenda-send'
-      fullPath: '/api/public/agenda-send'
-      preLoaderRoute: typeof ApiPublicAgendaSendRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/atendimento': {
+      id: '/_authenticated/atendimento'
+      path: '/atendimento'
+      fullPath: '/atendimento'
+      preLoaderRoute: typeof AuthenticatedAtendimentoRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/api/public/dispatch-scheduled-messages': {
       id: '/api/public/dispatch-scheduled-messages'
@@ -234,11 +227,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicDispatchScheduledMessagesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/message-media/$messageId': {
-      id: '/api/public/message-media/$messageId'
-      path: '/api/public/message-media/$messageId'
-      fullPath: '/api/public/message-media/$messageId'
-      preLoaderRoute: typeof ApiPublicMessageMediaMessageIdRouteImport
+    '/api/public/agenda-send': {
+      id: '/api/public/agenda-send'
+      path: '/api/public/agenda-send'
+      fullPath: '/api/public/agenda-send'
+      preLoaderRoute: typeof ApiPublicAgendaSendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/uazapi-webhook/$channelId': {
@@ -246,6 +239,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/uazapi-webhook/$channelId'
       fullPath: '/api/public/uazapi-webhook/$channelId'
       preLoaderRoute: typeof ApiPublicUazapiWebhookChannelIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/message-media/$messageId': {
+      id: '/api/public/message-media/$messageId'
+      path: '/api/public/message-media/$messageId'
+      fullPath: '/api/public/message-media/$messageId'
+      preLoaderRoute: typeof ApiPublicMessageMediaMessageIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }

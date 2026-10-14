@@ -39,6 +39,31 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
 
         const eventLower = extractEventName(payload).toLowerCase();
 
+        // Evento final do history-sync assíncrono: status/has_more/next_request.
+        // Precisa vir antes do ramo de conexão, senão `includes("status")` o engole.
+        const hs = payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+          ? { ...payload.data, ...payload } : payload;
+        const isHistoryStatus =
+          eventLower !== "history" &&
+          (hs?.request_id !== undefined || hs?.requestId !== undefined ||
+            hs?.has_more !== undefined || hs?.next_request !== undefined);
+        if (isHistoryStatus) {
+          try {
+            const { applyHistoryStatus } = await import("@/lib/uazapi-history.server");
+            const reqId = hs?.request_id ?? hs?.requestId;
+            let q = supabaseAdmin.from("history_sync_state").select("conversation_id").eq("channel_id", channelId);
+            const chatJid = hs?.number ?? hs?.chatid ?? hs?.chat_jid;
+            if (reqId) q = q.eq("request_id", String(reqId));
+            else if (chatJid) q = q.eq("chat_jid", String(chatJid));
+            else q = q.eq("conversation_id", "00000000-0000-0000-0000-000000000000");
+            const { data: rows } = await q.limit(1);
+            if (rows?.[0]) await applyHistoryStatus(supabaseAdmin, rows[0].conversation_id, hs);
+          } catch (e) {
+            console.error("[uazapi webhook] history status err:", (e as Error).message);
+          }
+          return new Response("ok");
+        }
+
         // Eventos de conexão
         if (eventLower.includes("connection") || eventLower.includes("status")) {
           const raw = payload?.data?.status ?? payload?.status;

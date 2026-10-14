@@ -191,7 +191,7 @@ export async function pullOlderHistory(
 }
 
 /** Processa a fila (chats mais recentes primeiro), concorrência máx 3. */
-export async function runBackfillBatch(sb: any, opts: { deadline: number; concurrency?: number; limit?: number; channelId?: string }) {
+export async function runBackfillBatch(sb: any, opts: { deadline: number; concurrency?: number; limit?: number; channelId?: string; pages?: number; reserveMs?: number }) {
   const lockCutoff = new Date(Date.now() - LOCK_MS).toISOString();
   let q = sb
     .from("history_sync_state")
@@ -210,9 +210,9 @@ export async function runBackfillBatch(sb: any, opts: { deadline: number; concur
   let processed = 0;
   let added = 0;
   const worker = async () => {
-    while (queue.length && Date.now() < opts.deadline - 22_000) {
+    while (queue.length && Date.now() < opts.deadline - (opts.reserveMs ?? 22_000)) {
       const item = queue.shift()!;
-      const r = await pullOlderHistory(sb, item.conversation_id, { pages: 5, deadline: opts.deadline });
+      const r = await pullOlderHistory(sb, item.conversation_id, { pages: opts.pages ?? 5, deadline: opts.deadline + 21_000 - (opts.reserveMs ?? 22_000) + 1_000 });
       processed++;
       added += r.added;
     }

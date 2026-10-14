@@ -43,7 +43,7 @@ async function historyFetch(token: string, body: any): Promise<{ httpStatus: num
 
 export function chatJidFor(contact: any): string | null {
   const jid = contact?.metadata?.whatsapp?.remote_jid;
-  if (jid && typeof jid === "string" && !jid.includes("@lid")) return jid;
+  if (jid && typeof jid === "string" && (jid.endsWith("@lid") || !jid.includes("@lid"))) return jid;
   const phone = String(contact?.phone ?? "");
   if (!phone) return jid ?? null;
   if (phone.includes("@")) return phone;
@@ -57,12 +57,13 @@ export async function enqueueHistory(sb: any, conversationId: string, channelId:
   );
 }
 
-const BLOCK_CODES = ["blocked", "history_access_unavailable"];
+const BLOCK_CODES = ["sem_ancora", "blocked", "history_access_unavailable"];
 const ERROR_CODES = ["pagination_no_progress", "anchor_unavailable", "cursor_lookup_failed"];
 
 function errorCode(data: any): string | null {
   const raw = [data?.error, data?.code, data?.reason, data?.status, data?.history_access]
     .filter((x) => typeof x === "string").join(" ").toLowerCase();
+  if (raw.includes("no anchor")) return "sem_ancora";
   for (const c of [...BLOCK_CODES, ...ERROR_CODES]) if (raw.includes(c)) return c;
   return null;
 }
@@ -80,7 +81,8 @@ export async function applyHistoryStatus(sb: any, conversationId: string, data: 
     patch.status = "done"; patch.has_more = false; patch.next_request = null; patch.last_error = null;
   } else {
     patch.status = "pending";
-    if (data?.next_request) patch.next_request = data.next_request;
+    // Sem next_request: a próxima rodada recua usando a mensagem mais antiga que temos.
+    patch.next_request = data?.next_request ?? null;
     if (data?.has_more === true) patch.has_more = true;
   }
   await sb.from("history_sync_state").update(patch).eq("conversation_id", conversationId);
@@ -139,9 +141,23 @@ export async function pullOlderHistory(
     for (let page = 0; page < pages; page++) {
       if (Date.now() > deadline - 21_000 && page > 0) break;
       const requestId = crypto.randomUUID();
-      const body = nextRequest
-        ? { sync: true, timeoutMs: 20000, ...nextRequest }
-        : { number: jid, count: 100, requestId, sync: true, timeoutMs: 20000 };
+      let body: any;
+      if (nextRequest) {
+        body = { sync: true, timeoutMs: 20000, ...nextRequest };
+      } else {
+        // Âncora explícita: a mensagem mais antiga que temos (ou agora, se nenhuma).
+        const { data: oldestMsg } = await sb.from("messages")
+          .select("external_id, created_at").eq("conversation_id", conversationId)
+          .not("external_id", "is", null)
+          .order("created_at", { ascending: true }).limit(1).maybeSingle();
+        body = { number: jid, count: 100, requestId, sync: true, timeoutMs: 20000 };
+        if (oldestMsg?.external_id) {
+          body.messageid = oldestMsg.external_id;
+          body.timestamp = Math.floor(new Date(oldestMsg.created_at).getTime() / 1000);
+        } else {
+          body.timestamp = Math.floor(Date.now() / 1000);
+        }
+      }
 
       let resp = await historyFetch(token, body);
       for (let retry = 0; (resp.httpStatus === 429 || resp.httpStatus === 409) && retry < 3; retry++) {
@@ -171,8 +187,10 @@ export async function pullOlderHistory(
         }
       }
       fetched += msgs.length;
+      const progress = msgs.length > 0 || added > 0;
 
       status = await applyHistoryStatus(sb, conversationId, data, {
+        ...(progress ? { attempts: 0 } : {}),
         fetched_count: fetched,
         oldest_message_at: oldest,
         request_id: body.requestId ?? data?.request_id ?? data?.requestId ?? null,

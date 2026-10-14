@@ -18,7 +18,7 @@ export const Route = createFileRoute("/api/public/history-backfill")({
         const result = await runBackfillBatch(supabaseAdmin, {
           deadline: Date.now() + 50_000,
           concurrency: 3,
-          limit: 12,
+          limit: 20,
         });
         if (result.remaining === 0) {
           await supabaseAdmin.rpc("disarm_history_backfill" as any);

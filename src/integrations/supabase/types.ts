@@ -247,6 +247,7 @@ export type Database = {
           has_more: boolean
           last_activity_at: string | null
           last_error: string | null
+          last_response: Json | null
           next_request: Json | null
           oldest_message_at: string | null
           request_id: string | null
@@ -262,6 +263,7 @@ export type Database = {
           has_more?: boolean
           last_activity_at?: string | null
           last_error?: string | null
+          last_response?: Json | null
           next_request?: Json | null
           oldest_message_at?: string | null
           request_id?: string | null
@@ -277,6 +279,7 @@ export type Database = {
           has_more?: boolean
           last_activity_at?: string | null
           last_error?: string | null
+          last_response?: Json | null
           next_request?: Json | null
           oldest_message_at?: string | null
           request_id?: string | null

@@ -16,14 +16,18 @@ async function throttle() {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function historyFetch(token: string, body: any): Promise<{ httpStatus: number; data: any }> {
+function historyFetch(token: string, body: any) {
+  return uazapiPost(token, "/message/history-sync", body);
+}
+
+async function uazapiPost(token: string, path: string, body: any): Promise<{ httpStatus: number; data: any }> {
   const url = process.env.UAZAPI_URL?.replace(/\/$/, "");
   if (!url) throw new Error("UAZAPI_URL não configurada");
   await throttle();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 28_000);
   try {
-    const res = await fetch(`${url}/message/history-sync`, {
+    const res = await fetch(`${url}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", token },
       body: JSON.stringify(body),
@@ -130,39 +134,79 @@ export async function pullOlderHistory(
     .select("conversation_id");
   if (!locked?.length) return { added: 0, hasMore: true, status: "running", skipped: true };
 
-  let nextRequest: any = state.next_request;
   let added = 0;
   let fetched = state.fetched_count ?? 0;
   let oldest: string | null = state.oldest_message_at;
   let status = "pending";
   let hasMore = true;
+  let emptyRounds = state.empty_rounds ?? 0;
+
+  const ingestAll = async (msgs: any[]) => {
+    for (const m of msgs) {
+      try { if (await ingestMessage(sb, conv.channel_id, m)) added++; }
+      catch (e) { console.error("[history] ingest err:", (e as Error).message); }
+      const ts = Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t);
+      if (Number.isFinite(ts) && ts > 0) {
+        const iso = new Date(ts > 1e12 ? ts : ts * 1000).toISOString();
+        if (!oldest || iso < oldest) oldest = iso;
+      }
+    }
+    fetched += msgs.length;
+  };
 
   try {
+    // 1) Coleta o que chegou depois para o request_id da rodada anterior.
+    let foundPrev = 0;
+    if (state.request_id) {
+      let offset = 0;
+      for (let i = 0; i < 20; i++) {
+        const r = await uazapiPost(token, "/message/find", {
+          track_source: "history_sync_manual", track_id: state.request_id, limit: 1000, offset,
+        });
+        const d = r.data ?? {};
+        const msgs: any[] = Array.isArray(d?.messages) ? d.messages : Array.isArray(d) ? d : [];
+        await ingestAll(msgs);
+        foundPrev += msgs.length;
+        const pg = d?.pagination;
+        if (r.httpStatus >= 400 || !pg?.hasMore || pg?.nextOffset == null || !msgs.length) break;
+        offset = Number(pg.nextOffset);
+      }
+      if (foundPrev > 0) {
+        await sb.from("history_sync_state").update({
+          fetched_count: fetched, oldest_message_at: oldest, attempts: 0,
+          last_activity_at: new Date().toISOString(),
+        }).eq("conversation_id", conversationId);
+      }
+    }
+
     for (let page = 0; page < pages; page++) {
       if (Date.now() > deadline - 21_000 && page > 0) break;
       const requestId = crypto.randomUUID();
-      let body: any;
-      if (nextRequest) {
-        body = { sync: true, timeoutMs: 20000, ...nextRequest };
+      // Âncora: a mensagem mais antiga que temos (ou agora, se nenhuma).
+      const { data: oldestMsg } = await sb.from("messages")
+        .select("external_id, created_at, direction").eq("conversation_id", conversationId)
+        .not("external_id", "is", null)
+        .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      const body: any = { number: jid, count: 100, requestId, sync: true, timeoutMs: 20000 };
+      if (oldestMsg?.external_id) {
+        body.messageid = oldestMsg.external_id;
+        body.fromMe = oldestMsg.direction === "outbound";
+        body.timestamp = Math.floor(new Date(oldestMsg.created_at).getTime() / 1000);
       } else {
-        // Âncora explícita: a mensagem mais antiga que temos (ou agora, se nenhuma).
-        const { data: oldestMsg } = await sb.from("messages")
-          .select("external_id, created_at").eq("conversation_id", conversationId)
-          .not("external_id", "is", null)
-          .order("created_at", { ascending: true }).limit(1).maybeSingle();
-        body = { number: jid, count: 100, requestId, sync: true, timeoutMs: 20000 };
-        if (oldestMsg?.external_id) {
-          body.messageid = oldestMsg.external_id;
-          body.timestamp = Math.floor(new Date(oldestMsg.created_at).getTime() / 1000);
-        } else {
-          body.timestamp = Math.floor(Date.now() / 1000);
-        }
+        body.timestamp = Math.floor(Date.now() / 1000);
       }
 
       let resp = await historyFetch(token, body);
       for (let retry = 0; (resp.httpStatus === 429 || resp.httpStatus === 409) && retry < 3; retry++) {
         await sleep(1500 * (retry + 1));
-        if (resp.httpStatus === 409 && !nextRequest) body.requestId = crypto.randomUUID();
+        if (resp.httpStatus === 409) body.requestId = crypto.randomUUID();
+        resp = await historyFetch(token, body);
+      }
+      // messageid desconhecido localmente: tenta uma vez só com timestamp.
+      const errTxt = (typeof resp.data === "string" ? resp.data : `${resp.data?.error ?? ""} ${resp.data?.message ?? ""}`).toLowerCase();
+      if (body.messageid && errTxt.includes("not found locally")) {
+        delete body.messageid; delete body.fromMe;
+        body.requestId = crypto.randomUUID();
         resp = await historyFetch(token, body);
       }
       if (resp.httpStatus === 429 || resp.httpStatus === 409) {
@@ -173,6 +217,7 @@ export async function pullOlderHistory(
       }
       const data = resp.data ?? {};
       const msgs: any[] = Array.isArray(data?.messages) ? data.messages : [];
+      const details = (data && typeof data === "object" && data.details) || {};
 
       // Diagnóstico: guarda o que a uazapi respondeu (nunca o token).
       try {
@@ -198,30 +243,39 @@ export async function pullOlderHistory(
       } catch (e) { console.error("[history] last_response err:", (e as Error).message); }
 
       if (resp.httpStatus >= 400 && !errorCode(data)) {
-        throw new Error(typeof data === "string" ? data.slice(0, 200) : data?.error ?? `HTTP ${resp.httpStatus}`);
+        throw new Error(typeof data === "string" ? data.slice(0, 200) : data?.error ?? data?.message ?? `HTTP ${resp.httpStatus}`);
       }
 
-      for (const m of msgs) {
-        try { if (await ingestMessage(sb, conv.channel_id, m)) added++; }
-        catch (e) { console.error("[history] ingest err:", (e as Error).message); }
-        const ts = Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t);
-        if (Number.isFinite(ts) && ts > 0) {
-          const iso = new Date(ts > 1e12 ? ts : ts * 1000).toISOString();
-          if (!oldest || iso < oldest) oldest = iso;
-        }
-      }
-      fetched += msgs.length;
-      const progress = msgs.length > 0 || added > 0;
+      await ingestAll(msgs);
+      const received = Number(details.received_messages ?? data?.received ?? 0) || 0;
+      const progress = msgs.length > 0 || received > 0 || foundPrev > 0;
+      if (resp.httpStatus === 200 && !progress) emptyRounds++;
+      else if (progress) emptyRounds = 0;
 
-      status = await applyHistoryStatus(sb, conversationId, data, {
+      const reqId = data?.request_id ?? body.requestId;
+      const finished =
+        (details.pending_more === false && received === 0 && msgs.length === 0 && foundPrev === 0) ||
+        emptyRounds >= 3;
+
+      const extra: Record<string, any> = {
         ...(progress ? { attempts: 0 } : {}),
         fetched_count: fetched,
         oldest_message_at: oldest,
-        request_id: body.requestId ?? data?.request_id ?? data?.requestId ?? null,
-      });
+        request_id: reqId ?? null,
+        empty_rounds: emptyRounds,
+      };
+      if (finished) {
+        await applyHistoryStatus(sb, conversationId, { has_more: false }, extra);
+        await sb.from("history_sync_state").update({ last_error: "sem_mais_historico" })
+          .eq("conversation_id", conversationId);
+        status = "done";
+      } else {
+        // timed_out/partial/202: fica pending; a próxima rodada coleta via /message/find.
+        status = await applyHistoryStatus(sb, conversationId, data, extra);
+      }
       hasMore = status !== "done" && status !== "blocked";
-      if (status !== "pending" || !data?.next_request) break;
-      nextRequest = data.next_request;
+      // Mensagens do request atual chegam depois; não encadeia outro sync agora.
+      break;
     }
   } catch (e) {
     status = "error";

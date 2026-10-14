@@ -1,0 +1,1 @@
+ALTER TABLE public.history_sync_state ADD COLUMN IF NOT EXISTS empty_rounds integer NOT NULL DEFAULT 0;

@@ -557,6 +557,7 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { ensureChatConversation, ingestMessage } = await import("./uazapi-ingest.server");
+    const { enqueueHistory, runBackfillBatch } = await import("./uazapi-history.server");
 
     const q = supabaseAdmin
       .from("channels")
@@ -721,8 +722,9 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
           chatid.includes("@newsletter")
         ) continue;
 
+        let ensured: any = null;
         try {
-          await ensureChatConversation(supabaseAdmin, ch.id, chat);
+          ensured = await ensureChatConversation(supabaseAdmin, ch.id, chat);
         } catch (e) {
           errors++;
           console.error("[uazapi sync] ensure chat err:", chatid, (e as Error).message);
@@ -762,19 +764,31 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
         }
         chatsProcessed++;
 
-        // O histórico anterior ao cache local chega de forma assíncrona pelo
-        // evento `history`; por isso o webhook é reparado antes desta etapa.
+        // Histórico anterior ao cache local (~7 dias): entra na fila do
+        // history-sync, que segue next_request até has_more:false.
         if (exhaustedLocally) {
           try {
-            await uazapiFetch("/message/history-sync", {
-              token,
-              body: { number: chatid, mode: "history", count: 100 },
-            });
-            historyRequested++;
+            const convId = ensured?.conversationId;
+            if (convId) {
+              await enqueueHistory(supabaseAdmin, convId, ch.id, chatid);
+              historyRequested++;
+            }
           } catch (e) {
-            console.warn("[uazapi sync] history-sync falhou:", chatid, (e as Error).message);
+            console.warn("[uazapi sync] enqueue history falhou:", chatid, (e as Error).message);
           }
         }
+      }
+    }
+
+    // Fila: chats mais recentes primeiro; o restante segue pelo cron.
+    try { await supabaseAdmin.rpc("arm_history_backfill" as any); } catch (e) {
+      console.warn("[uazapi sync] arm backfill falhou:", (e as Error).message);
+    }
+    if (!outOfTime()) {
+      try {
+        await runBackfillBatch(supabaseAdmin, { deadline, pages: 1, reserveMs: 0, limit: 3, channelId: data.channelId });
+      } catch (e) {
+        console.warn("[uazapi sync] backfill batch falhou:", (e as Error).message);
       }
     }
 
@@ -789,6 +803,51 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       webhookErrors,
       partial: false as const,
       cursor: null,
+    };
+  });
+
+// ---------- histórico antigo sob demanda ----------
+export const loadOlderMessages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ conversationId: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    // RLS: só segue se o usuário enxerga a conversa.
+    const { data: visible } = await context.supabase
+      .from("conversations").select("id").eq("id", data.conversationId).maybeSingle();
+    if (!visible) throw new Error("Conversa não encontrada");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { pullOlderHistory } = await import("./uazapi-history.server");
+    const r = await pullOlderHistory(supabaseAdmin, data.conversationId, { pages: 1 });
+    return { added: r.added, hasMore: r.hasMore, status: r.status };
+  });
+
+export const getHistoryBackfillStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ channelId: z.string().uuid().optional() }))
+  .handler(async ({ data, context }) => {
+    const sb = context.supabase;
+    const base = () => {
+      let q = sb.from("history_sync_state").select("conversation_id", { count: "exact", head: true });
+      if (data.channelId) q = q.eq("channel_id", data.channelId);
+      return q;
+    };
+    const [total, finished, errored] = await Promise.all([
+      base(),
+      base().in("status", ["done", "blocked"]),
+      base().eq("status", "error"),
+    ]);
+    let rq = sb.from("history_sync_state").select("fetched_count, last_error, updated_at")
+      .order("updated_at", { ascending: false }).limit(5000);
+    if (data.channelId) rq = rq.eq("channel_id", data.channelId);
+    const { data: rows } = await rq;
+    const imported = (rows ?? []).reduce((s: number, r: any) => s + (r.fetched_count ?? 0), 0);
+    const lastError = (rows ?? []).find((r: any) => r.last_error)?.last_error ?? null;
+    return {
+      total: total.count ?? 0,
+      finished: finished.count ?? 0,
+      errored: errored.count ?? 0,
+      imported,
+      lastError,
     };
   });
 

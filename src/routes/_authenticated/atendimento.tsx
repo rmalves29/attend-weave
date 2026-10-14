@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo, useRef, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
 import { usePresence } from "@/hooks/usePresence";
 import {
   sendUazapiMessage, sendUazapiMedia, syncUazapiHistory, getMessageMedia,
-  deleteUazapiMessage, forwardUazapiMessage,
+  deleteUazapiMessage, forwardUazapiMessage, loadOlderMessages,
 } from "@/lib/uazapi.functions";
 import {
   transferConversation, setConversationStatus, addInternalNote,
@@ -33,6 +33,7 @@ import {
   Instagram, Facebook, Check, CheckCheck, RefreshCw, DownloadCloud, Loader2,
   MoreVertical, Reply, Forward, Trash2, X, StickyNote, ArrowRightLeft,
   CheckCircle2, RotateCcw, Zap, Plus, Clock, CalendarClock, Eye,
+  ArrowLeft, PanelRightClose, PanelRightOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
@@ -123,6 +124,8 @@ function AtendimentoPage() {
   const [filter, setFilter] = useState<
     "all" | "unread" | "open" | "pending" | "resolved" | "groups"
   >("all");
+  const [tagFilter, setTagFilter] = useState<string>("");
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const qc = useQueryClient();
 
@@ -293,11 +296,17 @@ function AtendimentoPage() {
           if (!(c.unread_count > 0)) return false;
         } else if (filter !== "all" && c.status !== filter) return false;
       }
+      if (tagFilter && !(c.tags ?? []).some((t) => t.toLowerCase() === tagFilter)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return c.contacts?.name?.toLowerCase().includes(q) || c.last_message_preview?.toLowerCase().includes(q);
     });
-  }, [conversations, search, filter]);
+  }, [conversations, search, filter, tagFilter]);
+
+  const tagOptions = useMemo(
+    () => Array.from(new Set(conversations.flatMap((c) => (c.tags ?? []).map((t) => t.toLowerCase())))).sort(),
+    [conversations],
+  );
 
   const unreadTotal = useMemo(
     () => conversations.reduce(
@@ -333,9 +342,9 @@ function AtendimentoPage() {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Coluna 1: lista de conversas */}
-      <div className="w-80 border-r border-border bg-sidebar flex flex-col">
+      <div className={`${selected ? "hidden md:flex" : "flex"} w-full md:w-80 shrink-0 min-h-0 border-r border-border bg-sidebar flex-col`}>
         <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-lg">Conversas</h2>
@@ -409,13 +418,24 @@ function AtendimentoPage() {
               </button>
             ))}
           </div>
+          {tagOptions.length > 0 && (
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="mt-2 w-full h-8 rounded-md bg-input text-xs px-2 border-0"
+              aria-label="Filtrar por etiqueta"
+            >
+              <option value="">Todas as etiquetas</option>
+              {tagOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
           {unreadTotal > 0 && (
             <div className="mt-2 text-[11px] text-muted-foreground">
               {unreadConvCount} {unreadConvCount === 1 ? "conversa" : "conversas"} · {unreadTotal} {unreadTotal === 1 ? "mensagem não lida" : "mensagens não lidas"}
             </div>
           )}
         </div>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           {filtered.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
               {filter === "groups" ? "Nenhum grupo encontrado." : "Nenhuma conversa encontrada."}
@@ -472,9 +492,16 @@ function AtendimentoPage() {
 
       {/* Coluna 2: chat */}
       {selected ? (
-        <ChatWindow conversation={selected} me={me ?? null} />
+        <ChatWindow
+          key={selected.id}
+          conversation={selected}
+          me={me ?? null}
+          onBack={() => setSelectedId(null)}
+          panelOpen={panelOpen}
+          onTogglePanel={() => setPanelOpen((v) => !v)}
+        />
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-[var(--chat-bg)] text-muted-foreground">
+        <div className="hidden md:flex flex-1 items-center justify-center bg-[var(--chat-bg)] text-muted-foreground">
           <div className="text-center max-w-md p-6">
             <MessageCircle className="w-16 h-16 mx-auto mb-4 opacity-40" />
             <h3 className="text-lg font-medium text-foreground">AttendFlow</h3>
@@ -484,12 +511,26 @@ function AtendimentoPage() {
       )}
 
       {/* Coluna 3: detalhes do contato */}
-      {selected && <ContactPanel conversation={selected} />}
+      {selected && panelOpen && (
+        <div className="hidden lg:flex min-h-0">
+          <ContactPanel conversation={selected} />
+        </div>
+      )}
     </div>
   );
 }
 
-function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id: string; name: string } | null }) {
+const MSG_PAGE = 50;
+
+function ChatWindow({
+  conversation, me, onBack, panelOpen, onTogglePanel,
+}: {
+  conversation: Conversation;
+  me: { id: string; name: string } | null;
+  onBack: () => void;
+  panelOpen: boolean;
+  onTogglePanel: () => void;
+}) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -541,9 +582,11 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
     setMentionIds((prev) => Array.from(new Set([...prev, agent.id])));
   };
 
-  const { data: messages = [] } = useQuery({
+  // Paginação reversa (padrão WhatsApp Web): página 0 = mais recentes.
+  const msgsQuery = useInfiniteQuery({
     queryKey: ["messages", conversation.contact_id, conversation.channel_id],
-    queryFn: async () => {
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }) => {
       const { data: relatedConversations, error: convErr } = await supabase
         .from("conversations")
         .select("id")
@@ -552,21 +595,86 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
       if (convErr) throw convErr;
       const ids = (relatedConversations ?? []).map((c) => c.id);
       if (!ids.length) return [] as Message[];
-
-      const { data, error } = await supabase
+      let q = supabase
         .from("messages")
         .select("*")
         .in("conversation_id", ids)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false })
+        .limit(MSG_PAGE);
+      if (pageParam) q = q.lt("created_at", pageParam);
+      const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as Message[];
+      return ((data ?? []) as Message[]).reverse();
     },
+    getNextPageParam: (last) => (last.length < MSG_PAGE ? undefined : last[0]?.created_at),
     refetchInterval: 8000,
   });
+  const messages = useMemo(
+    () => (msgsQuery.data?.pages ?? []).slice().reverse().flat(),
+    [msgsQuery.data],
+  );
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length]);
+  const { data: syncState, refetch: refetchSyncState } = useQuery({
+    queryKey: ["history-sync-state", conversation.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("history_sync_state")
+        .select("status, has_more")
+        .eq("conversation_id", conversation.id)
+        .maybeSingle();
+      return data;
+    },
+  });
+  const loadOlderFn = useServerFn(loadOlderMessages);
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+  const historyDone = syncState?.status === "done";
+  const historyBlocked = syncState?.status === "blocked";
+
+  const loadOlder = async () => {
+    const el = scrollRef.current;
+    if (!el || loadingOlderRef.current) return;
+    if (msgsQuery.hasNextPage) {
+      loadingOlderRef.current = true;
+      anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      try { await msgsQuery.fetchNextPage(); } finally { loadingOlderRef.current = false; }
+      return;
+    }
+    if (syncState?.has_more === false || historyDone || historyBlocked) return;
+    if (conversation.channels?.type !== "whatsapp") return;
+    loadingOlderRef.current = true;
+    setPhoneLoading(true);
+    try {
+      const r = await loadOlderFn({ data: { conversationId: conversation.id } });
+      if (r.added > 0) {
+        anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+        await msgsQuery.refetch();
+      }
+      await refetchSyncState();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Falha ao buscar mensagens do celular");
+    } finally {
+      setPhoneLoading(false);
+      // Pequena pausa evita disparar várias vezes enquanto o usuário segura o topo.
+      setTimeout(() => { loadingOlderRef.current = false; }, 1500);
+    }
+  };
+
+  const lastIdRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (anchorRef.current) {
+      // Mantém a posição ao inserir mensagens antigas no topo.
+      el.scrollTop = el.scrollHeight - anchorRef.current.height + anchorRef.current.top;
+      anchorRef.current = null;
+    } else {
+      const newest = messages[messages.length - 1]?.id ?? null;
+      if (newest !== lastIdRef.current) el.scrollTop = el.scrollHeight;
+    }
+    lastIdRef.current = messages[messages.length - 1]?.id ?? null;
+  }, [messages]);
 
   const sendFn = useServerFn(sendUazapiMessage);
   const sendMutation = useMutation({
@@ -660,15 +768,18 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--chat-bg)]">
-      <header className="h-16 px-4 flex items-center gap-3 bg-[var(--chat-panel)] border-b border-border">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-[var(--chat-bg)]">
+      <header className="h-16 shrink-0 px-2 md:px-4 flex items-center gap-3 bg-[var(--chat-panel)] border-b border-border">
+        <Button type="button" variant="ghost" size="icon" className="md:hidden" onClick={onBack} title="Voltar">
+          <ArrowLeft className="w-5 h-5" />
+        </Button>
         <Avatar className="w-10 h-10">
           <AvatarFallback className="bg-primary/20 text-primary">
             {conversation.contacts?.name?.[0]?.toUpperCase() ?? "?"}
           </AvatarFallback>
         </Avatar>
-        <div className="flex-1">
-          <div className="font-medium">{conversation.contacts?.name}</div>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium truncate">{conversation.contacts?.name}</div>
           <div className="text-xs text-muted-foreground flex items-center gap-1">
             {channelIcon(conversation.channels?.type)} {conversation.channels?.name}
           </div>
@@ -684,10 +795,35 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
         )}
         <Badge variant="outline" className="capitalize">{conversation.status}</Badge>
         <ConversationActions conversation={conversation} />
+        <Button
+          type="button" variant="ghost" size="icon" className="hidden lg:inline-flex"
+          onClick={onTogglePanel} title={panelOpen ? "Ocultar painel do contato" : "Mostrar painel do contato"}
+        >
+          {panelOpen ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
+        </Button>
       </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
-        {messages.length === 0 && (
+      <div
+        ref={scrollRef}
+        onScroll={(e) => { if (e.currentTarget.scrollTop < 120) loadOlder(); }}
+        className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-4"
+      >
+        <div className="flex justify-center py-2 min-h-8">
+          {msgsQuery.isFetchingNextPage ? (
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</span>
+          ) : phoneLoading ? (
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Carregando mensagens do celular…</span>
+          ) : msgsQuery.hasNextPage ? (
+            <button type="button" className="text-xs text-primary hover:underline" onClick={loadOlder}>Carregar mensagens anteriores</button>
+          ) : historyBlocked ? (
+            <span className="text-[11px] px-3 py-1 rounded-full bg-muted text-muted-foreground">O WhatsApp não liberou mensagens mais antigas deste chat</span>
+          ) : historyDone || syncState?.has_more === false || conversation.channels?.type !== "whatsapp" ? (
+            messages.length > 0 ? <span className="text-[11px] px-3 py-1 rounded-full bg-muted text-muted-foreground">Início da conversa</span> : null
+          ) : messages.length > 0 ? (
+            <button type="button" className="text-xs text-primary hover:underline" onClick={loadOlder}>Buscar mensagens anteriores no celular</button>
+          ) : null}
+        </div>
+        {messages.length === 0 && !msgsQuery.isLoading && (
           <div className="text-center text-sm text-muted-foreground py-12">
             Sem mensagens ainda. Envie a primeira!
           </div>
@@ -697,6 +833,8 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
           const showDay = !prev || !isSameDay(new Date(prev.created_at), new Date(m.created_at));
           const isOut = m.direction === "outbound";
           const deleted = m.metadata?.deleted;
+          // Bolhas agrupadas: mesma direção, mesmo dia, sem nota entre elas.
+          const grouped = !!prev && !showDay && !prev.is_internal && !m.is_internal && prev.direction === m.direction;
           const replyTo = m.metadata?.replyTo;
           const daySeparator = showDay ? (
             <div className="flex justify-center my-3">
@@ -707,7 +845,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
           ) : null;
           if (m.is_internal) {
             return (
-              <div key={m.id}>
+              <div key={m.id} className="mt-2">
                 {daySeparator}
                 <div className="flex justify-center">
                   <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200">
@@ -724,7 +862,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
             );
           }
           return (
-            <div key={m.id}>
+            <div key={m.id} className={grouped ? "mt-0.5" : "mt-2"}>
               {daySeparator}
               <div className={`group flex items-start gap-1 ${isOut ? "justify-end" : "justify-start"}`}>
               {isOut && (
@@ -739,8 +877,8 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
               <div
                 className={`max-w-[65%] px-3 py-2 rounded-lg text-sm shadow-sm ${
                   isOut
-                    ? "bg-[var(--chat-bubble-out)] text-foreground rounded-tr-none"
-                    : "bg-[var(--chat-bubble-in)] text-foreground rounded-tl-none"
+                    ? `bg-[var(--chat-bubble-out)] text-foreground ${grouped ? "" : "rounded-tr-none"}`
+                    : `bg-[var(--chat-bubble-in)] text-foreground ${grouped ? "" : "rounded-tl-none"}`
                 } ${deleted ? "italic opacity-70" : ""}`}
               >
                 {replyTo && (
@@ -843,7 +981,7 @@ function ChatWindow({ conversation, me }: { conversation: Conversation; me: { id
         </div>
       )}
 
-      <form onSubmit={handleSend} className="bg-[var(--chat-panel)] px-4 py-3 flex items-center gap-2 border-t border-border">
+      <form onSubmit={handleSend} className="shrink-0 bg-[var(--chat-panel)] px-2 md:px-4 py-3 flex items-center gap-2 border-t border-border">
         <Button
           type="button"
           variant={noteMode ? "default" : "ghost"}
@@ -1530,7 +1668,7 @@ function NotesSection({ conversationId }: { conversationId: string }) {
 function ContactPanel({ conversation }: { conversation: Conversation }) {
   const c = conversation.contacts;
   return (
-    <aside className="w-80 border-l border-border bg-sidebar p-6 overflow-y-auto">
+    <aside className="w-80 h-full border-l border-border bg-sidebar p-6 overflow-y-auto">
       <div className="flex flex-col items-center text-center mb-6">
         <Avatar className="w-24 h-24 mb-3">
           <AvatarFallback className="bg-primary/20 text-primary text-2xl">

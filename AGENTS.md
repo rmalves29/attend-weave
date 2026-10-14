@@ -1,0 +1,1 @@
+- Old WhatsApp history is backfilled via src/lib/uazapi-history.server.ts with progress in public.history_sync_state; the backfill cron is armed on enqueue and unscheduled when the queue drains (avoids permanent polling).

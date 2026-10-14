@@ -237,6 +237,62 @@ export type Database = {
           },
         ]
       }
+      history_sync_state: {
+        Row: {
+          attempts: number
+          channel_id: string
+          chat_jid: string
+          conversation_id: string
+          fetched_count: number
+          has_more: boolean
+          last_activity_at: string | null
+          last_error: string | null
+          next_request: Json | null
+          oldest_message_at: string | null
+          request_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          channel_id: string
+          chat_jid: string
+          conversation_id: string
+          fetched_count?: number
+          has_more?: boolean
+          last_activity_at?: string | null
+          last_error?: string | null
+          next_request?: Json | null
+          oldest_message_at?: string | null
+          request_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          channel_id?: string
+          chat_jid?: string
+          conversation_id?: string
+          fetched_count?: number
+          has_more?: boolean
+          last_activity_at?: string | null
+          last_error?: string | null
+          next_request?: Json | null
+          oldest_message_at?: string | null
+          request_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "history_sync_state_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: true
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string | null
@@ -466,6 +522,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      arm_history_backfill: { Args: never; Returns: undefined }
+      check_backfill_secret: { Args: { _secret: string }; Returns: boolean }
+      disarm_history_backfill: { Args: never; Returns: undefined }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

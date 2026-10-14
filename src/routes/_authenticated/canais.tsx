@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -19,7 +20,7 @@ import { MessageCircle, Instagram, Facebook, Plus, QrCode, Trash2, Loader2, Refr
 import { toast } from "sonner";
 import {
   createUazapiInstance, connectUazapiInstance, getUazapiStatus,
-  disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory,
+  disconnectUazapiInstance, deleteUazapiInstance, syncUazapiHistory, getHistoryBackfillStatus,
 } from "@/lib/uazapi.functions";
 
 type SyncCursor = { channelIndex: number; chatIndex: number; messageOffset: number };
@@ -232,7 +233,40 @@ function ChannelCard({ channel, onConnect, onDelete, onChanged }: any) {
           <Trash2 className="w-4 h-4" />
         </Button>
       </div>
+      {channel.type === "whatsapp" && (
+        <HistorySyncCard channelId={channel.id} connected={channel.status === "connected"} syncing={syncing} onSync={handleSync} />
+      )}
     </Card>
+  );
+}
+
+function HistorySyncCard({ channelId, connected, syncing, onSync }: any) {
+  const statusFn = useServerFn(getHistoryBackfillStatus);
+  const { data } = useQuery({
+    queryKey: ["history-backfill", channelId],
+    queryFn: () => statusFn({ data: { channelId } }),
+    refetchInterval: 15000,
+  });
+  const total = data?.total ?? 0;
+  const finished = data?.finished ?? 0;
+  const pct = total ? Math.round((finished / total) * 100) : 0;
+  return (
+    <div className="mt-4 rounded-lg border border-border p-3 space-y-2">
+      <div className="flex items-center justify-between text-sm font-medium">
+        <span>Sincronização do histórico</span>
+        <span className="text-xs text-muted-foreground">{finished}/{total} chats</span>
+      </div>
+      <Progress value={pct} />
+      <div className="text-xs text-muted-foreground">
+        {(data?.imported ?? 0).toLocaleString("pt-BR")} mensagens antigas importadas
+        {data?.errored ? ` · ${data.errored} com erro` : ""}
+      </div>
+      {data?.lastError && <div className="text-xs text-destructive truncate" title={data.lastError}>Último erro: {data.lastError}</div>}
+      <Button size="sm" variant="secondary" className="w-full" onClick={onSync} disabled={!connected || syncing}>
+        {syncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+        Sincronizar histórico completo
+      </Button>
+    </div>
   );
 }
 

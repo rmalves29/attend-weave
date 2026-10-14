@@ -18,6 +18,7 @@ import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authen
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as ApiPublicAgendaSendRouteImport } from './routes/api/public/agenda-send'
 import { Route as ApiPublicDispatchScheduledMessagesRouteImport } from './routes/api/public/dispatch-scheduled-messages'
+import { Route as ApiPublicHistoryBackfillRouteImport } from './routes/api/public/history-backfill'
 import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
 import { Route as ApiPublicUazapiWebhookChannelIdRouteImport } from './routes/api/public/uazapi-webhook.$channelId'
 
@@ -68,6 +69,12 @@ const ApiPublicDispatchScheduledMessagesRoute =
     path: '/api/public/dispatch-scheduled-messages',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHistoryBackfillRoute =
+  ApiPublicHistoryBackfillRouteImport.update({
+    id: '/api/public/history-backfill',
+    path: '/api/public/history-backfill',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicMessageMediaMessageIdRoute =
   ApiPublicMessageMediaMessageIdRouteImport.update({
     id: '/api/public/message-media/$messageId',
@@ -90,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
+  '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -102,6 +110,7 @@ export interface FileRoutesByTo {
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
+  '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -116,6 +125,7 @@ export interface FileRoutesById {
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
+  '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
   '/api/public/uazapi-webhook/$channelId': typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
     | '/relatorios'
     | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
+    | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesByTo: FileRoutesByTo
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/relatorios'
     | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
+    | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   id:
@@ -155,6 +167,7 @@ export interface FileRouteTypes {
     | '/_authenticated/relatorios'
     | '/api/public/agenda-send'
     | '/api/public/dispatch-scheduled-messages'
+    | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
     | '/api/public/uazapi-webhook/$channelId'
   fileRoutesById: FileRoutesById
@@ -165,6 +178,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiPublicAgendaSendRoute: typeof ApiPublicAgendaSendRoute
   ApiPublicDispatchScheduledMessagesRoute: typeof ApiPublicDispatchScheduledMessagesRoute
+  ApiPublicHistoryBackfillRoute: typeof ApiPublicHistoryBackfillRoute
   ApiPublicMessageMediaMessageIdRoute: typeof ApiPublicMessageMediaMessageIdRoute
   ApiPublicUazapiWebhookChannelIdRoute: typeof ApiPublicUazapiWebhookChannelIdRoute
 }
@@ -234,6 +248,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicDispatchScheduledMessagesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/history-backfill': {
+      id: '/api/public/history-backfill'
+      path: '/api/public/history-backfill'
+      fullPath: '/api/public/history-backfill'
+      preLoaderRoute: typeof ApiPublicHistoryBackfillRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/message-media/$messageId': {
       id: '/api/public/message-media/$messageId'
       path: '/api/public/message-media/$messageId'
@@ -275,6 +296,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAgendaSendRoute: ApiPublicAgendaSendRoute,
   ApiPublicDispatchScheduledMessagesRoute:
     ApiPublicDispatchScheduledMessagesRoute,
+  ApiPublicHistoryBackfillRoute: ApiPublicHistoryBackfillRoute,
   ApiPublicMessageMediaMessageIdRoute: ApiPublicMessageMediaMessageIdRoute,
   ApiPublicUazapiWebhookChannelIdRoute: ApiPublicUazapiWebhookChannelIdRoute,
 }

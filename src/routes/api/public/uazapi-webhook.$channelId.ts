@@ -126,6 +126,33 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           try { await ingestMessage(supabaseAdmin, channelId, m); }
           catch (e) { console.error("[uazapi webhook] ingest err:", e); }
         }
+
+        // Evento history com request_id: soma fetched_count e recua oldest_message_at.
+        const histReqId = hs?.request_id ?? hs?.requestId;
+        if (eventLower === "history" && histReqId && messages.length) {
+          try {
+            const { data: rows } = await supabaseAdmin.from("history_sync_state")
+              .select("conversation_id, fetched_count, oldest_message_at")
+              .eq("channel_id", channelId).eq("request_id", String(histReqId)).limit(1);
+            const row: any = rows?.[0];
+            if (row) {
+              let oldest: string | null = row.oldest_message_at;
+              for (const m of messages) {
+                const ts = Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t);
+                if (Number.isFinite(ts) && ts > 0) {
+                  const iso = new Date(ts > 1e12 ? ts : ts * 1000).toISOString();
+                  if (!oldest || iso < oldest) oldest = iso;
+                }
+              }
+              await supabaseAdmin.from("history_sync_state").update({
+                fetched_count: (row.fetched_count ?? 0) + messages.length,
+                oldest_message_at: oldest,
+                attempts: 0,
+                last_activity_at: new Date().toISOString(),
+              }).eq("conversation_id", row.conversation_id);
+            }
+          } catch (e) { console.error("[uazapi webhook] history counters err:", (e as Error).message); }
+        }
         return new Response("ok");
       },
     },

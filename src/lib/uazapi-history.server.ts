@@ -172,11 +172,35 @@ export async function pullOlderHistory(
         break;
       }
       const data = resp.data ?? {};
+      const msgs: any[] = Array.isArray(data?.messages) ? data.messages : [];
+
+      // Diagnóstico: guarda o que a uazapi respondeu (nunca o token).
+      try {
+        const { token: _t, ...bodySent } = body ?? {};
+        const isObj = data && typeof data === "object";
+        let raw = "";
+        try { raw = (typeof data === "string" ? data : JSON.stringify(data)).slice(0, 1500); } catch { /* */ }
+        if (token) raw = raw.split(token).join("[redacted]");
+        await sb.from("history_sync_state").update({
+          last_response: {
+            http: resp.httpStatus,
+            body_sent: bodySent,
+            keys: isObj ? Object.keys(data) : [],
+            status: isObj ? data.status ?? null : null,
+            has_more: isObj ? data.has_more ?? null : null,
+            history_access: isObj ? data.history_access ?? null : null,
+            n_messages: msgs.length,
+            next_request: isObj ? data.next_request ?? null : null,
+            error: isObj ? data.error ?? data.message ?? null : null,
+            raw,
+          },
+        }).eq("conversation_id", conversationId);
+      } catch (e) { console.error("[history] last_response err:", (e as Error).message); }
+
       if (resp.httpStatus >= 400 && !errorCode(data)) {
         throw new Error(typeof data === "string" ? data.slice(0, 200) : data?.error ?? `HTTP ${resp.httpStatus}`);
       }
 
-      const msgs: any[] = Array.isArray(data?.messages) ? data.messages : [];
       for (const m of msgs) {
         try { if (await ingestMessage(sb, conv.channel_id, m)) added++; }
         catch (e) { console.error("[history] ingest err:", (e as Error).message); }

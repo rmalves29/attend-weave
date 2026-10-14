@@ -202,12 +202,30 @@ export async function pullOlderHistory(
         if (resp.httpStatus === 409) body.requestId = crypto.randomUUID();
         resp = await historyFetch(token, body);
       }
-      // messageid desconhecido localmente: tenta uma vez só com timestamp.
-      const errTxt = (typeof resp.data === "string" ? resp.data : `${resp.data?.error ?? ""} ${resp.data?.message ?? ""}`).toLowerCase();
-      if (body.messageid && errTxt.includes("not found locally")) {
+      // Âncora inválida ("not found locally" ou "is not a valid history sync anchor"):
+      // tenta uma vez só com timestamp; se persistir, ancora na mensagem mais antiga seguinte (offset 1..3).
+      const isAnchorErr = (r: { httpStatus: number; data: any }) => {
+        const t = (typeof r.data === "string" ? r.data : `${r.data?.error ?? ""} ${r.data?.message ?? ""}`).toLowerCase();
+        return t.includes("not found locally") || (r.httpStatus >= 400 && t.includes("is not a valid history sync anchor"));
+      };
+      if (body.messageid && isAnchorErr(resp)) {
         delete body.messageid; delete body.fromMe;
         body.requestId = crypto.randomUUID();
         resp = await historyFetch(token, body);
+        for (let offset = 1; offset <= 3 && isAnchorErr(resp); offset++) {
+          const { data: olderMsg } = await sb.from("messages")
+            .select("external_id, created_at, direction").eq("conversation_id", conversationId)
+            .not("external_id", "is", null)
+            .order("created_at", { ascending: true })
+            .range(offset, offset)
+            .maybeSingle();
+          if (!olderMsg?.external_id) break;
+          body.messageid = olderMsg.external_id;
+          body.fromMe = olderMsg.direction === "outbound";
+          body.timestamp = Math.floor(new Date(olderMsg.created_at).getTime() / 1000);
+          body.requestId = crypto.randomUUID();
+          resp = await historyFetch(token, body);
+        }
       }
       if (resp.httpStatus === 429 || resp.httpStatus === 409) {
         status = "pending";

@@ -243,6 +243,7 @@ export type Database = {
           channel_id: string
           chat_jid: string
           conversation_id: string
+          empty_rounds: number
           fetched_count: number
           has_more: boolean
           last_activity_at: string | null
@@ -259,6 +260,7 @@ export type Database = {
           channel_id: string
           chat_jid: string
           conversation_id: string
+          empty_rounds?: number
           fetched_count?: number
           has_more?: boolean
           last_activity_at?: string | null
@@ -275,6 +277,7 @@ export type Database = {
           channel_id?: string
           chat_jid?: string
           conversation_id?: string
+          empty_rounds?: number
           fetched_count?: number
           has_more?: boolean
           last_activity_at?: string | null

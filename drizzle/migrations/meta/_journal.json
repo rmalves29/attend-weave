@@ -15,6 +15,13 @@
       "when": 1792012752075,
       "tag": "0001_history_sync_last_response",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792013022871,
+      "tag": "0002_history_sync_empty_rounds",
+      "breakpoints": true
     }
   ]
 }

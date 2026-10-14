@@ -61,7 +61,7 @@ const BLOCK_CODES = ["sem_ancora", "blocked", "history_access_unavailable"];
 const ERROR_CODES = ["pagination_no_progress", "anchor_unavailable", "cursor_lookup_failed"];
 
 function errorCode(data: any): string | null {
-  const raw = [data?.error, data?.code, data?.reason, data?.status, data?.history_access]
+  const raw = [typeof data === "string" ? data : null, data?.error, data?.message, data?.code, data?.reason, data?.status, data?.history_access]
     .filter((x) => typeof x === "string").join(" ").toLowerCase();
   if (raw.includes("no anchor")) return "sem_ancora";
   for (const c of [...BLOCK_CODES, ...ERROR_CODES]) if (raw.includes(c)) return c;

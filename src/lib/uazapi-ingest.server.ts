@@ -366,8 +366,15 @@ export async function ingestMessage(sb: any, channelId: string, m: any, chat?: a
   const conversationId = state.conversationId;
   const unread = state.unread;
   const lastMessageAt = state.lastMessageAt;
+  const createdAt = timestamp
+    ? new Date(timestamp > 1e12 ? timestamp : timestamp * 1000).toISOString()
+    : undefined;
+  // Mensagens antigas (backfill) não reabrem conversas nem cancelam follow-ups.
+  const historicalEarly = createdAt
+    ? Date.now() - new Date(createdAt).getTime() > 2 * 60_000
+    : false;
   let wasResolved = false;
-  if (!fromMe && (state.status === "resolved" || state.status === "closed")) {
+  if (!fromMe && !historicalEarly && (state.status === "resolved" || state.status === "closed")) {
     wasResolved = true;
     const { error } = await sb
       .from("conversations")
@@ -381,17 +388,13 @@ export async function ingestMessage(sb: any, channelId: string, m: any, chat?: a
     if (error) throw error;
   }
 
-  if (!fromMe) {
+  if (!fromMe && !historicalEarly) {
     await sb
       .from("tag_followups")
       .update({ status: "cancelled" })
       .eq("conversation_id", conversationId)
       .eq("status", "pending");
   }
-
-  const createdAt = timestamp
-    ? new Date(timestamp > 1e12 ? timestamp : timestamp * 1000).toISOString()
-    : undefined;
 
   const insertRow: any = {
     conversation_id: conversationId,

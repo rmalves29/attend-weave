@@ -83,7 +83,7 @@ export async function processDueFollowups(supabaseAdmin: any, limit = 3): Promis
         content,
         status: "sent",
         external_id: res.externalId,
-        metadata: { auto_followup: { tag: tag.name, followup_id: fu.id } },
+        metadata: { auto_followup: { tag: tag.name, followup_id: fu.id }, automated: true },
       });
       await supabaseAdmin.from("conversations").update({
         last_message_at: new Date().toISOString(),

@@ -14,6 +14,125 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_analyses: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          error: string | null
+          failed_conversations: number
+          filters: Json
+          finished_at: string | null
+          id: string
+          lease_until: string | null
+          processed_conversations: number
+          result_json: Json | null
+          result_markdown: string | null
+          sampled: boolean
+          since: string
+          status: string
+          store_context: string | null
+          total_conversations: number
+          until: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          failed_conversations?: number
+          filters?: Json
+          finished_at?: string | null
+          id?: string
+          lease_until?: string | null
+          processed_conversations?: number
+          result_json?: Json | null
+          result_markdown?: string | null
+          sampled?: boolean
+          since: string
+          status?: string
+          store_context?: string | null
+          total_conversations?: number
+          until: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          failed_conversations?: number
+          filters?: Json
+          finished_at?: string | null
+          id?: string
+          lease_until?: string | null
+          processed_conversations?: number
+          result_json?: Json | null
+          result_markdown?: string | null
+          sampled?: boolean
+          since?: string
+          status?: string
+          store_context?: string | null
+          total_conversations?: number
+          until?: string
+        }
+        Relationships: []
+      }
+      ai_analysis_items: {
+        Row: {
+          analysis_id: string
+          attempts: number
+          conversation_id: string
+          created_at: string
+          error: string | null
+          id: string
+          result: Json | null
+          status: string
+        }
+        Insert: {
+          analysis_id: string
+          attempts?: number
+          conversation_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          result?: Json | null
+          status?: string
+        }
+        Update: {
+          analysis_id?: string
+          attempts?: number
+          conversation_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          result?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_analysis_items_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "ai_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       bot_menu_options: {
         Row: {
           action_type: string
@@ -528,8 +647,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_analysis_candidates: {
+        Args: {
+          _channel_ids: string[]
+          _include_groups: boolean
+          _min_messages: number
+          _since: string
+          _until: string
+        }
+        Returns: {
+          chars: number
+          conversation_id: string
+          last_at: string
+          msg_count: number
+        }[]
+      }
+      arm_ai_analysis_worker: { Args: never; Returns: undefined }
       arm_history_backfill: { Args: never; Returns: undefined }
+      check_ai_worker_secret: { Args: { _secret: string }; Returns: boolean }
       check_backfill_secret: { Args: { _secret: string }; Returns: boolean }
+      claim_ai_analysis: { Args: { _secs: number }; Returns: string }
+      disarm_ai_analysis_worker: { Args: never; Returns: undefined }
       disarm_history_backfill: { Args: never; Returns: undefined }
       has_role: {
         Args: {
@@ -564,6 +702,24 @@ export type Database = {
           resolved_count: number
         }[]
       }
+      report_agent_performance_v3: {
+        Args: {
+          _channel_ids?: string[]
+          _include_groups?: boolean
+          _since: string
+          _until: string
+        }
+        Returns: {
+          agent_id: string
+          agent_name: string
+          avg_first_response_secs: number
+          conversations_attended: number
+          messages_sent: number
+          p50_first_response_secs: number
+          resolved_count: number
+          turns_answered: number
+        }[]
+      }
       report_channel_breakdown: {
         Args: { _since: string; _until: string }
         Returns: {
@@ -576,6 +732,25 @@ export type Database = {
           outbound_count: number
         }[]
       }
+      report_channel_breakdown_v3: {
+        Args: {
+          _channel_ids?: string[]
+          _include_groups?: boolean
+          _since: string
+          _until: string
+        }
+        Returns: {
+          channel_id: string
+          channel_name: string
+          channel_type: string
+          conversations_count: number
+          inbound_count: number
+          outbound_count: number
+          p50_first_response_secs: number
+          turns_total: number
+          turns_unanswered: number
+        }[]
+      }
       report_daily_flow: {
         Args: { _since: string }
         Returns: {
@@ -586,6 +761,19 @@ export type Database = {
       }
       report_daily_flow_v2: {
         Args: { _channel_ids?: string[]; _since: string; _until: string }
+        Returns: {
+          day: string
+          inbound: number
+          outbound: number
+        }[]
+      }
+      report_daily_flow_v3: {
+        Args: {
+          _channel_ids?: string[]
+          _include_groups?: boolean
+          _since: string
+          _until: string
+        }
         Returns: {
           day: string
           inbound: number
@@ -609,6 +797,24 @@ export type Database = {
           hour: number
           inbound: number
         }[]
+      }
+      report_hourly_heatmap_v3: {
+        Args: {
+          _channel_ids?: string[]
+          _include_groups?: boolean
+          _since: string
+          _until: string
+        }
+        Returns: {
+          dow: number
+          hour: number
+          inbound: number
+        }[]
+      }
+      report_is_automated: { Args: { _meta: Json }; Returns: boolean }
+      report_is_group: {
+        Args: { _ext: string; _meta: Json; _phone: string }
+        Returns: boolean
       }
       report_overview: {
         Args: { _since: string }
@@ -649,6 +855,23 @@ export type Database = {
           sla_total_count: number
         }[]
       }
+      report_overview_v3: {
+        Args: {
+          _channel_ids?: string[]
+          _include_groups?: boolean
+          _since: string
+          _until: string
+        }
+        Returns: Json
+      }
+      report_scope_v3: {
+        Args: { _channel_ids: string[]; _include_groups: boolean }
+        Returns: {
+          channel_id: string
+          contact_id: string
+          conversation_id: string
+        }[]
+      }
       report_top_tags: {
         Args: {
           _channel_ids?: string[]
@@ -659,6 +882,22 @@ export type Database = {
         Returns: {
           conversations_count: number
           tag_name: string
+        }[]
+      }
+      report_turns_v3: {
+        Args: {
+          _channel_ids: string[]
+          _include_groups: boolean
+          _since: string
+          _until: string
+        }
+        Returns: {
+          channel_id: string
+          conversation_id: string
+          responded: boolean
+          responded_at: string
+          responder_agent_id: string
+          started_at: string
         }[]
       }
     }

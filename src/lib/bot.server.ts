@@ -49,7 +49,7 @@ async function persistBotMessage(
     content: text,
     status: "sent",
     external_id: externalId,
-    metadata: { welcome_bot: meta },
+    metadata: { welcome_bot: meta, automated: true },
   });
   await sb
     .from("conversations")

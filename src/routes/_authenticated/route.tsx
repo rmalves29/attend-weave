@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, redirect, Link, useRouter } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
-import { MessageCircle, BarChart3, Radio, Settings, LogOut } from "lucide-react";
+import { MessageCircle, BarChart3, Radio, Settings, LogOut, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
@@ -17,6 +17,7 @@ export const Route = createFileRoute("/_authenticated")({
 const navItems = [
   { to: "/atendimento", icon: MessageCircle, label: "Atendimento" },
   { to: "/relatorios", icon: BarChart3, label: "Relatórios" },
+  { to: "/analise-ia", icon: Sparkles, label: "Análise com IA" },
   { to: "/canais", icon: Radio, label: "Canais" },
   { to: "/configuracoes", icon: Settings, label: "Config." },
 ];

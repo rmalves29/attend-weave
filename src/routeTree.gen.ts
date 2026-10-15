@@ -12,11 +12,13 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedAnaliseIaRouteImport } from './routes/_authenticated/analise-ia'
 import { Route as AuthenticatedAtendimentoRouteImport } from './routes/_authenticated/atendimento'
 import { Route as AuthenticatedCanaisRouteImport } from './routes/_authenticated/canais'
 import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as ApiPublicAgendaSendRouteImport } from './routes/api/public/agenda-send'
+import { Route as ApiPublicAiAnalysisWorkerRouteImport } from './routes/api/public/ai-analysis-worker'
 import { Route as ApiPublicDispatchScheduledMessagesRouteImport } from './routes/api/public/dispatch-scheduled-messages'
 import { Route as ApiPublicHistoryBackfillRouteImport } from './routes/api/public/history-backfill'
 import { Route as ApiPublicMessageMediaMessageIdRouteImport } from './routes/api/public/message-media.$messageId'
@@ -35,6 +37,11 @@ const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedAnaliseIaRoute = AuthenticatedAnaliseIaRouteImport.update({
+  id: '/analise-ia',
+  path: '/analise-ia',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAtendimentoRoute =
   AuthenticatedAtendimentoRouteImport.update({
@@ -63,6 +70,12 @@ const ApiPublicAgendaSendRoute = ApiPublicAgendaSendRouteImport.update({
   path: '/api/public/agenda-send',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAiAnalysisWorkerRoute =
+  ApiPublicAiAnalysisWorkerRouteImport.update({
+    id: '/api/public/ai-analysis-worker',
+    path: '/api/public/ai-analysis-worker',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicDispatchScheduledMessagesRoute =
   ApiPublicDispatchScheduledMessagesRouteImport.update({
     id: '/api/public/dispatch-scheduled-messages',
@@ -91,11 +104,13 @@ const ApiPublicUazapiWebhookChannelIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/analise-ia': typeof AuthenticatedAnaliseIaRoute
   '/atendimento': typeof AuthenticatedAtendimentoRoute
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
+  '/api/public/ai-analysis-worker': typeof ApiPublicAiAnalysisWorkerRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
@@ -104,11 +119,13 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/analise-ia': typeof AuthenticatedAnaliseIaRoute
   '/atendimento': typeof AuthenticatedAtendimentoRoute
   '/canais': typeof AuthenticatedCanaisRoute
   '/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
+  '/api/public/ai-analysis-worker': typeof ApiPublicAiAnalysisWorkerRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
@@ -119,11 +136,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/analise-ia': typeof AuthenticatedAnaliseIaRoute
   '/_authenticated/atendimento': typeof AuthenticatedAtendimentoRoute
   '/_authenticated/canais': typeof AuthenticatedCanaisRoute
   '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
   '/api/public/agenda-send': typeof ApiPublicAgendaSendRoute
+  '/api/public/ai-analysis-worker': typeof ApiPublicAiAnalysisWorkerRoute
   '/api/public/dispatch-scheduled-messages': typeof ApiPublicDispatchScheduledMessagesRoute
   '/api/public/history-backfill': typeof ApiPublicHistoryBackfillRoute
   '/api/public/message-media/$messageId': typeof ApiPublicMessageMediaMessageIdRoute
@@ -134,11 +153,13 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/analise-ia'
     | '/atendimento'
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
     | '/api/public/agenda-send'
+    | '/api/public/ai-analysis-worker'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
@@ -147,11 +168,13 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/analise-ia'
     | '/atendimento'
     | '/canais'
     | '/configuracoes'
     | '/relatorios'
     | '/api/public/agenda-send'
+    | '/api/public/ai-analysis-worker'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
@@ -161,11 +184,13 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/analise-ia'
     | '/_authenticated/atendimento'
     | '/_authenticated/canais'
     | '/_authenticated/configuracoes'
     | '/_authenticated/relatorios'
     | '/api/public/agenda-send'
+    | '/api/public/ai-analysis-worker'
     | '/api/public/dispatch-scheduled-messages'
     | '/api/public/history-backfill'
     | '/api/public/message-media/$messageId'
@@ -177,6 +202,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ApiPublicAgendaSendRoute: typeof ApiPublicAgendaSendRoute
+  ApiPublicAiAnalysisWorkerRoute: typeof ApiPublicAiAnalysisWorkerRoute
   ApiPublicDispatchScheduledMessagesRoute: typeof ApiPublicDispatchScheduledMessagesRoute
   ApiPublicHistoryBackfillRoute: typeof ApiPublicHistoryBackfillRoute
   ApiPublicMessageMediaMessageIdRoute: typeof ApiPublicMessageMediaMessageIdRoute
@@ -205,6 +231,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/analise-ia': {
+      id: '/_authenticated/analise-ia'
+      path: '/analise-ia'
+      fullPath: '/analise-ia'
+      preLoaderRoute: typeof AuthenticatedAnaliseIaRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/atendimento': {
       id: '/_authenticated/atendimento'
@@ -241,6 +274,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAgendaSendRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/ai-analysis-worker': {
+      id: '/api/public/ai-analysis-worker'
+      path: '/api/public/ai-analysis-worker'
+      fullPath: '/api/public/ai-analysis-worker'
+      preLoaderRoute: typeof ApiPublicAiAnalysisWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/dispatch-scheduled-messages': {
       id: '/api/public/dispatch-scheduled-messages'
       path: '/api/public/dispatch-scheduled-messages'
@@ -273,6 +313,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAnaliseIaRoute: typeof AuthenticatedAnaliseIaRoute
   AuthenticatedAtendimentoRoute: typeof AuthenticatedAtendimentoRoute
   AuthenticatedCanaisRoute: typeof AuthenticatedCanaisRoute
   AuthenticatedConfiguracoesRoute: typeof AuthenticatedConfiguracoesRoute
@@ -280,6 +321,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAnaliseIaRoute: AuthenticatedAnaliseIaRoute,
   AuthenticatedAtendimentoRoute: AuthenticatedAtendimentoRoute,
   AuthenticatedCanaisRoute: AuthenticatedCanaisRoute,
   AuthenticatedConfiguracoesRoute: AuthenticatedConfiguracoesRoute,
@@ -294,6 +336,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ApiPublicAgendaSendRoute: ApiPublicAgendaSendRoute,
+  ApiPublicAiAnalysisWorkerRoute: ApiPublicAiAnalysisWorkerRoute,
   ApiPublicDispatchScheduledMessagesRoute:
     ApiPublicDispatchScheduledMessagesRoute,
   ApiPublicHistoryBackfillRoute: ApiPublicHistoryBackfillRoute,

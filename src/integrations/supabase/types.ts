@@ -14,6 +14,125 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_analyses: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          error: string | null
+          failed_conversations: number
+          filters: Json
+          finished_at: string | null
+          id: string
+          lease_until: string | null
+          processed_conversations: number
+          result_json: Json | null
+          result_markdown: string | null
+          sampled: boolean
+          since: string
+          status: string
+          store_context: string | null
+          total_conversations: number
+          until: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          failed_conversations?: number
+          filters?: Json
+          finished_at?: string | null
+          id?: string
+          lease_until?: string | null
+          processed_conversations?: number
+          result_json?: Json | null
+          result_markdown?: string | null
+          sampled?: boolean
+          since: string
+          status?: string
+          store_context?: string | null
+          total_conversations?: number
+          until: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          failed_conversations?: number
+          filters?: Json
+          finished_at?: string | null
+          id?: string
+          lease_until?: string | null
+          processed_conversations?: number
+          result_json?: Json | null
+          result_markdown?: string | null
+          sampled?: boolean
+          since?: string
+          status?: string
+          store_context?: string | null
+          total_conversations?: number
+          until?: string
+        }
+        Relationships: []
+      }
+      ai_analysis_items: {
+        Row: {
+          analysis_id: string
+          attempts: number
+          conversation_id: string
+          created_at: string
+          error: string | null
+          id: string
+          result: Json | null
+          status: string
+        }
+        Insert: {
+          analysis_id: string
+          attempts?: number
+          conversation_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          result?: Json | null
+          status?: string
+        }
+        Update: {
+          analysis_id?: string
+          attempts?: number
+          conversation_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          result?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_analysis_items_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "ai_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       bot_menu_options: {
         Row: {
           action_type: string
@@ -528,8 +647,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_analysis_candidates: {
+        Args: {
+          _channel_ids: string[]
+          _include_groups: boolean
+          _min_messages: number
+          _since: string
+          _until: string
+        }
+        Returns: {
+          chars: number
+          conversation_id: string
+          last_at: string
+          msg_count: number
+        }[]
+      }
+      arm_ai_analysis_worker: { Args: never; Returns: undefined }
       arm_history_backfill: { Args: never; Returns: undefined }
+      check_ai_worker_secret: { Args: { _secret: string }; Returns: boolean }
       check_backfill_secret: { Args: { _secret: string }; Returns: boolean }
+      claim_ai_analysis: { Args: { _secs: number }; Returns: string }
+      disarm_ai_analysis_worker: { Args: never; Returns: undefined }
       disarm_history_backfill: { Args: never; Returns: undefined }
       has_role: {
         Args: {

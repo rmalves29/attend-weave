@@ -204,7 +204,7 @@ async function runReduce(sb: Sb, a: any) {
   const numbersTxt = `Conversas analisadas: ${nums.n}. Nota média: ${nums.nota.toFixed(2)}. Desfechos: ${nums.desfecho.map(([k, v]) => `${k}=${v}`).join(", ")}. Sentimento: ${nums.sentimento.map(([k, v]) => `${k}=${v}`).join(", ")}. Vendas perdidas: ${nums.vendas_perdidas}. Motivos: ${nums.motivos.map(([k, v]) => `${k} (${v})`).join("; ")}.`;
 
   if (!parts.core) {
-    const erros = countBy(results.flatMap((r: any) => (r.erros ?? []).map((e: any) => `${e.tipo}: ${e.descricao}`.toLowerCase())), (x) => x);
+    const erros = countBy(results.flatMap((r: any) => (r.erros ?? []).map((e: any) => `${e.tipo}: ${e.descricao}`.toLowerCase())), (x) => x as string);
     const errosEx = results.flatMap((r: any) => (r.erros ?? []).map((e: any) => `- [${e.tipo}] ${e.descricao} | "${e.trecho_curto}"`));
     const acertosEx = results.flatMap((r: any) => (r.acertos ?? []).map((e: any) => `- ${e.descricao} | "${e.trecho_curto}"`));
     const assuntos = countBy(results, (r: any) => r.assunto?.toLowerCase()).slice(0, 40);

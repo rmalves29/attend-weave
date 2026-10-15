@@ -170,7 +170,7 @@ export const getTopicsMetrics = createServerFn({ method: "POST" })
       supabaseAdmin.rpc("report_channel_breakdown_v3" as any, params(data, w.since, w.until)),
       supabaseAdmin.rpc("report_followups_summary" as any, { _since: w.since, _until: w.until }),
       supabaseAdmin.from("tags").select("id", { count: "exact", head: true }),
-      supabaseAdmin.from("conversations").select("id", { count: "exact", head: true }).neq("tags", "{}"),
+      supabaseAdmin.from("conversations").select("id", { count: "exact", head: true }).not("tags", "eq", "{}"),
     ]);
     if (tags.error) throw new Error(tags.error.message);
     if (ch.error) throw new Error(ch.error.message);

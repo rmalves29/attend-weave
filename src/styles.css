@@ -157,3 +157,10 @@
     letter-spacing: -0.01em;
   }
 }
+
+@media print {
+  aside, .no-print { display: none !important; }
+  html, body, main, .h-full, .h-screen { height: auto !important; overflow: visible !important; }
+  .print-area { max-width: none !important; }
+  .print-area h2 { break-after: avoid; }
+}

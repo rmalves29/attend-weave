@@ -46,7 +46,7 @@ const DOWS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 type Filters = { days: 7 | 30 | 90; channelIds: string[]; until: string; includeGroups: boolean };
 
-export function formatDuration(secs: number | null | undefined): string {
+function formatDuration(secs: number | null | undefined): string {
   if (secs == null) return "—";
   if (secs < 60) return `${Math.round(secs)}s`;
   if (secs < 3600) return `${Math.round(secs / 60)}min`;

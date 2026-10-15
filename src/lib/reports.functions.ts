@@ -1,113 +1,105 @@
 // Server functions do painel de relatórios gerenciais.
-// Toda a agregação acontece no Postgres via RPCs `report_*_v2` (migration
-// 20260710021226) executadas com service_role. As funções aqui apenas
-// autorizam o chamador (qualquer usuário com role em user_roles) e serializam
-// os parâmetros de janela + filtro por canal.
+// Agregação no Postgres via RPCs `report_*_v3` (migration 0003_reports_v3),
+// executadas com service_role. Regras: grupos fora por padrão, 1ª resposta
+// por turno (mesma lógica em visão geral, canais e equipe), resolução separada
+// entre atendente e finalização automática.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// ---------- Tipos compartilhados ----------
-
-export type ReportOverviewV2 = {
+export type ReportOverviewV3 = {
   inbound_count: number;
   outbound_count: number;
   conversations_active: number;
   conversations_new: number;
-  conversations_resolved: number;
-  conversations_open_now: number;
-  oldest_open_secs: number | null;
   contacts_new: number;
-  avg_first_response_secs: number | null;
-  avg_resolution_secs: number | null;
+  turns_total: number;
+  turns_answered: number;
+  turns_unanswered: number;
   p50_first_response_secs: number | null;
   p90_first_response_secs: number | null;
-  p95_first_response_secs: number | null;
-  p50_resolution_secs: number | null;
-  p90_resolution_secs: number | null;
-  p95_resolution_secs: number | null;
+  avg_first_response_secs: number | null;
   sla_5m_count: number;
   sla_15m_count: number;
   sla_1h_count: number;
-  sla_total_count: number;
+  resolved_by_agent: number;
+  auto_finalized: number;
+  p50_resolution_secs: number | null;
+  p90_resolution_secs: number | null;
+  avg_resolution_secs: number | null;
+  open_now_count: number;
+  oldest_open_secs: number | null;
 };
+// Alias para consumidores antigos.
+export type ReportOverviewV2 = ReportOverviewV3;
 
 export type ReportDailyFlow = { day: string; inbound: number; outbound: number };
-
-export type ReportAgentPerformanceV2 = {
-  agent_id: string;
+export type ReportAgentV3 = {
+  agent_id: string | null;
   agent_name: string;
   messages_sent: number;
   conversations_attended: number;
-  resolved_count: number;
+  turns_answered: number;
+  p50_first_response_secs: number | null;
   avg_first_response_secs: number | null;
-  aht_secs: number | null;
-  first_contact_resolution_count: number;
-  concurrent_avg: number;
-  concurrent_peak: number;
+  resolved_count: number;
 };
-
 export type ReportHeatmapCell = { dow: number; hour: number; inbound: number };
 export type ReportTopTag = { tag_name: string; conversations_count: number };
-export type ReportChannelBreakdown = {
+export type ReportChannelV3 = {
   channel_id: string;
   channel_name: string;
   channel_type: string;
   inbound_count: number;
   outbound_count: number;
   conversations_count: number;
-  avg_first_response_secs: number | null;
-};
-export type ReportFollowupsUpcoming = {
-  id: string;
-  send_at: string;
-  tag_name: string | null;
-  contact_name: string | null;
+  turns_total: number;
+  turns_unanswered: number;
+  p50_first_response_secs: number | null;
 };
 export type ReportFollowupsSummary = {
   scheduled_count: number;
   sent_count: number;
   cancelled_count: number;
   failed_count: number;
-  upcoming: ReportFollowupsUpcoming[];
+  upcoming: { id: string; send_at: string; tag_name: string | null; contact_name: string | null }[];
 };
-
-// ---------- Helpers ----------
 
 const inputSchema = z.object({
   days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
   channelIds: z.array(z.string().uuid()).optional(),
-  // `until` compartilhado pela página: sem ele cada aba fixava o "agora" no
-  // momento da própria requisição, fazendo os totais divergirem entre abas.
   until: z.string().datetime({ offset: true }).optional(),
+  includeGroups: z.boolean().optional(),
 });
-
 type WindowInput = z.infer<typeof inputSchema>;
 
 function windowRange(days: WindowInput["days"], untilIso?: string) {
   const until = untilIso ? new Date(untilIso) : new Date();
-  const since = new Date(until.getTime() - days * 24 * 60 * 60 * 1000);
-  const prevUntil = since;
-  const prevSince = new Date(since.getTime() - days * 24 * 60 * 60 * 1000);
+  const since = new Date(until.getTime() - days * 86_400_000);
+  const prevSince = new Date(since.getTime() - days * 86_400_000);
   return {
     since: since.toISOString(),
     until: until.toISOString(),
     prevSince: prevSince.toISOString(),
-    prevUntil: prevUntil.toISOString(),
+    prevUntil: since.toISOString(),
   };
 }
 
 async function assertRole(userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId);
+  const { data, error } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
   if (error) throw new Error(error.message);
   if (!data?.length) throw new Error("Sem permissão de atendimento.");
 }
 
-// ---------- 1. Visão geral (com comparativo) ----------
+function params(data: WindowInput, since: string, until: string) {
+  return {
+    _since: since,
+    _until: until,
+    _channel_ids: data.channelIds?.length ? data.channelIds : null,
+    _include_groups: !!data.includeGroups,
+  };
+}
 
 export const getOverviewMetrics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -115,41 +107,19 @@ export const getOverviewMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until, prevSince, prevUntil } = windowRange(data.days, data.until);
-    const channels = data.channelIds?.length ? data.channelIds : null;
-
+    const w = windowRange(data.days, data.until);
     const [curr, prev, daily] = await Promise.all([
-      supabaseAdmin.rpc("report_overview_v2" as any, {
-        _since: since,
-        _until: until,
-        _channel_ids: channels,
-      }),
-      supabaseAdmin.rpc("report_overview_v2" as any, {
-        _since: prevSince,
-        _until: prevUntil,
-        _channel_ids: channels,
-      }),
-      supabaseAdmin.rpc("report_daily_flow_v2" as any, {
-        _since: since,
-        _until: until,
-        _channel_ids: channels,
-      }),
+      supabaseAdmin.rpc("report_overview_v3" as any, params(data, w.since, w.until)),
+      supabaseAdmin.rpc("report_overview_v3" as any, params(data, w.prevSince, w.prevUntil)),
+      supabaseAdmin.rpc("report_daily_flow_v3" as any, params(data, w.since, w.until)),
     ]);
-    if (curr.error) throw new Error(curr.error.message);
-    if (prev.error) throw new Error(prev.error.message);
-    if (daily.error) throw new Error(daily.error.message);
-
-    const pick = (r: any): ReportOverviewV2 | null =>
-      (Array.isArray(r.data) ? r.data[0] : r.data) ?? null;
-
+    for (const r of [curr, prev, daily]) if (r.error) throw new Error(r.error.message);
     return {
-      overview: pick(curr),
-      previous: pick(prev),
+      overview: (curr.data ?? null) as ReportOverviewV3 | null,
+      previous: (prev.data ?? null) as ReportOverviewV3 | null,
       daily: (daily.data ?? []) as ReportDailyFlow[],
     };
   });
-
-// ---------- 2. SLA (usa mesma RPC de overview + heatmap) ----------
 
 export const getSlaMetrics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -157,33 +127,18 @@ export const getSlaMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days, data.until);
-    const channels = data.channelIds?.length ? data.channelIds : null;
-
+    const w = windowRange(data.days, data.until);
     const [ov, hm] = await Promise.all([
-      supabaseAdmin.rpc("report_overview_v2" as any, {
-        _since: since,
-        _until: until,
-        _channel_ids: channels,
-      }),
-      supabaseAdmin.rpc("report_hourly_heatmap" as any, {
-        _since: since,
-        _until: until,
-        _channel_ids: channels,
-      }),
+      supabaseAdmin.rpc("report_overview_v3" as any, params(data, w.since, w.until)),
+      supabaseAdmin.rpc("report_hourly_heatmap_v3" as any, params(data, w.since, w.until)),
     ]);
     if (ov.error) throw new Error(ov.error.message);
     if (hm.error) throw new Error(hm.error.message);
-
-    const overview =
-      ((Array.isArray(ov.data) ? ov.data[0] : ov.data) as ReportOverviewV2 | undefined) ?? null;
     return {
-      overview,
+      overview: (ov.data ?? null) as ReportOverviewV3 | null,
       heatmap: (hm.data ?? []) as ReportHeatmapCell[],
     };
   });
-
-// ---------- 3. Equipe ----------
 
 export const getTeamMetrics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -191,18 +146,14 @@ export const getTeamMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days, data.until);
-    const channels = data.channelIds?.length ? data.channelIds : null;
-
+    const w = windowRange(data.days, data.until);
     const { data: rows, error } = await supabaseAdmin.rpc(
-      "report_agent_performance_v2" as any,
-      { _since: since, _until: until, _channel_ids: channels },
+      "report_agent_performance_v3" as any,
+      params(data, w.since, w.until),
     );
     if (error) throw new Error(error.message);
-    return { agents: (rows ?? []) as ReportAgentPerformanceV2[] };
+    return { agents: (rows ?? []) as ReportAgentV3[] };
   });
-
-// ---------- 4. Assuntos e canais ----------
 
 export const getTopicsMetrics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -210,54 +161,41 @@ export const getTopicsMetrics = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { since, until } = windowRange(data.days, data.until);
+    const w = windowRange(data.days, data.until);
     const channels = data.channelIds?.length ? data.channelIds : null;
-
-    const [tags, ch, fu] = await Promise.all([
+    const [tags, ch, fu, tagCount, taggedConvs] = await Promise.all([
       supabaseAdmin.rpc("report_top_tags" as any, {
-        _since: since,
-        _until: until,
-        _limit: 10,
-        _channel_ids: channels,
+        _since: w.since, _until: w.until, _limit: 10, _channel_ids: channels,
       }),
-      supabaseAdmin.rpc("report_channel_breakdown" as any, { _since: since, _until: until }),
-      supabaseAdmin.rpc("report_followups_summary" as any, { _since: since, _until: until }),
+      supabaseAdmin.rpc("report_channel_breakdown_v3" as any, params(data, w.since, w.until)),
+      supabaseAdmin.rpc("report_followups_summary" as any, { _since: w.since, _until: w.until }),
+      supabaseAdmin.from("tags").select("id", { count: "exact", head: true }),
+      supabaseAdmin.from("conversations").select("id", { count: "exact", head: true }).neq("tags", "{}"),
     ]);
     if (tags.error) throw new Error(tags.error.message);
     if (ch.error) throw new Error(ch.error.message);
     if (fu.error) throw new Error(fu.error.message);
-
     const fuRow =
       ((Array.isArray(fu.data) ? fu.data[0] : fu.data) as ReportFollowupsSummary | undefined) ?? {
-        scheduled_count: 0,
-        sent_count: 0,
-        cancelled_count: 0,
-        failed_count: 0,
-        upcoming: [],
+        scheduled_count: 0, sent_count: 0, cancelled_count: 0, failed_count: 0, upcoming: [],
       };
-
     return {
       topTags: (tags.data ?? []) as ReportTopTag[],
-      channels: (ch.data ?? []) as ReportChannelBreakdown[],
+      channels: (ch.data ?? []) as ReportChannelV3[],
       followups: fuRow,
+      tagsRegistered: tagCount.count ?? 0,
+      conversationsWithTags: taggedConvs.count ?? 0,
     };
   });
-
-// ---------- 5. Lista de canais para o filtro ----------
 
 export const getChannelsForFilter = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await assertRole(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("channels")
-      .select("id, name, type")
-      .order("name");
+    const { data, error } = await supabaseAdmin.from("channels").select("id, name, type").order("name");
     if (error) throw new Error(error.message);
     return (data ?? []) as { id: string; name: string; type: string }[];
   });
 
-// ---------- Compatibilidade com código antigo ----------
-// (mantido caso algum consumidor externo importe getReportMetrics)
 export const getReportMetrics = getOverviewMetrics;

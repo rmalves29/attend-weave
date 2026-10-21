@@ -3,6 +3,7 @@
 // minuto. Autenticado por secret compartilhado — não usa JWT de usuário
 // porque não há um usuário logado disparando a chamada.
 import { createFileRoute } from "@tanstack/react-router";
+import { createHash, timingSafeEqual } from "crypto";
 
 export const Route = createFileRoute("/api/public/dispatch-scheduled-messages")({
   server: {
@@ -14,7 +15,9 @@ export const Route = createFileRoute("/api/public/dispatch-scheduled-messages")(
           return new Response("not configured", { status: 500 });
         }
         const provided = request.headers.get("x-cron-secret");
-        if (provided !== expected) {
+        const a = createHash("sha256").update(String(provided ?? "")).digest();
+        const b = createHash("sha256").update(expected).digest();
+        if (!timingSafeEqual(a, b) || String(provided ?? "").length !== expected.length) {
           return new Response("unauthorized", { status: 401 });
         }
 

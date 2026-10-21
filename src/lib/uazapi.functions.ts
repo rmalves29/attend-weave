@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 // Colunas seguras para leitura por qualquer autenticado (sem credentials)
 const CHANNEL_PUBLIC_COLS =
-  "id, name, type, identifier, status, qr_code, last_connected_at, created_at, updated_at";
+  "id, name, type, identifier, status, last_connected_at, created_at, updated_at";
 
 // ---------- helpers ----------
 function getUazapiConfig() {
@@ -64,6 +64,46 @@ async function assertAdmin(ctx: { supabase: any; userId: string }) {
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Apenas administradores podem gerenciar canais.");
+}
+
+// Atendente ou admin (qualquer role). Usuário sem role não age em nada.
+async function assertTeamMember(ctx: { userId: string }) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles").select("id").eq("user_id", ctx.userId).limit(1);
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Sem permissão.");
+}
+
+// As server functions usam supabaseAdmin (ignora RLS). Antes de agir numa
+// conversa/mensagem, confirma com o client do usuário (respeita RLS) que ele
+// enxerga aquele registro — mesma regra da tela de atendimento.
+async function assertConversationAccess(
+  ctx: { supabase: any },
+  conversationId: string,
+) {
+  const { data, error } = await ctx.supabase
+    .from("conversations").select("id").eq("id", conversationId).maybeSingle();
+  if (error || !data) throw new Error("Conversa não encontrada ou sem permissão.");
+}
+
+async function assertMessageAccess(ctx: { supabase: any }, messageId: string) {
+  const { data, error } = await ctx.supabase
+    .from("messages").select("id, conversation_id").eq("id", messageId).maybeSingle();
+  if (error || !data) throw new Error("Mensagem não encontrada ou sem permissão.");
+  return data as { id: string; conversation_id: string };
+}
+
+// O upload do painel grava em "<conversationId>/<uuid>.<ext>". Só aceita
+// caminhos dessa conversa — impede assinar arquivos de outras conversas.
+function assertStoragePathForConversation(storagePath: string, conversationId: string) {
+  if (
+    storagePath.includes("..") ||
+    storagePath.startsWith("/") ||
+    !storagePath.startsWith(`${conversationId}/`)
+  ) {
+    throw new Error("Arquivo inválido para esta conversa.");
+  }
 }
 
 async function loadChannelWithCreds(channelId: string) {
@@ -213,7 +253,11 @@ export const getUazapiStatus = createServerFn({ method: "POST" })
         console.warn("[uazapi] auto-history start falhou:", (e as Error).message);
       }
     }
-    return { status: mapped };
+    // QR só trafega por esta função (admin); a coluna não é legível pelo painel.
+    const qr: string | null =
+      mapped === "connected" ? null
+      : (res?.instance?.qrcode ?? res?.qrcode ?? (channel as any).qr_code ?? null);
+    return { status: mapped, qr };
   });
 
 // ---------- disconnect ----------
@@ -272,6 +316,8 @@ export const sendUazapiMessage = createServerFn({ method: "POST" })
     replyToMessageId: z.string().uuid().optional(),
   }))
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context, data.conversationId);
+    if (data.replyToMessageId) await assertMessageAccess(context, data.replyToMessageId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { sendTextViaUazapi } = await import("./uazapi-send.server");
 
@@ -323,6 +369,9 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
     replyToMessageId: z.string().uuid().optional(),
   }))
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context, data.conversationId);
+    assertStoragePathForConversation(data.storagePath, data.conversationId);
+    if (data.replyToMessageId) await assertMessageAccess(context, data.replyToMessageId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: conv, error: convErr } = await supabaseAdmin
@@ -401,7 +450,8 @@ export const sendUazapiMedia = createServerFn({ method: "POST" })
 export const deleteUazapiMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ messageId: z.string().uuid() }))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertMessageAccess(context, data.messageId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: msg, error } = await supabaseAdmin
       .from("messages")
@@ -440,6 +490,8 @@ export const forwardUazapiMessage = createServerFn({ method: "POST" })
     targetConversationId: z.string().uuid(),
   }))
   .handler(async ({ data, context }) => {
+    await assertMessageAccess(context, data.messageId);
+    await assertConversationAccess(context, data.targetConversationId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: msg, error: msgErr } = await supabaseAdmin
@@ -565,7 +617,8 @@ export const syncUazapiHistory = createServerFn({ method: "POST" })
       messageOffset: z.number().int().min(0),
     }).optional(),
   }))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertTeamMember(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { ensureChatConversation, ingestMessage } = await import("./uazapi-ingest.server");
     const { enqueueHistory, runBackfillBatch } = await import("./uazapi-history.server");
@@ -875,7 +928,8 @@ export const getHistoryBackfillStatus = createServerFn({ method: "POST" })
 export const getMessageMedia = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ messageId: z.string().uuid() }))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertMessageAccess(context, data.messageId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { resolveMessageMediaToStorage } = await import("./uazapi-media.server");
 

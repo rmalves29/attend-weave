@@ -250,6 +250,10 @@ export const addInternalNote = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await assertAgentOrAdmin(context.userId);
+    // RLS: só anota em conversa que o usuário enxerga.
+    const { data: visible } = await context.supabase
+      .from("conversations").select("id").eq("id", data.conversationId).maybeSingle();
+    if (!visible) throw new Error("Conversa não encontrada ou sem permissão.");
 
     let validMentions: string[] = [];
     if (data.mentions?.length) {

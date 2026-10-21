@@ -30,6 +30,10 @@ export const scheduleMessage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await assertAgentOrAdmin(context.userId);
+    // RLS: só agenda em conversa que o usuário enxerga.
+    const { data: visible } = await context.supabase
+      .from("conversations").select("id").eq("id", data.conversationId).maybeSingle();
+    if (!visible) throw new Error("Conversa não encontrada ou sem permissão.");
 
     const sendAt = new Date(data.sendAt);
     if (sendAt.getTime() <= Date.now()) {
@@ -55,6 +59,9 @@ export const listScheduledMessages = createServerFn({ method: "POST" })
   .inputValidator(z.object({ conversationId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await assertAgentOrAdmin(context.userId);
+    const { data: visible } = await context.supabase
+      .from("conversations").select("id").eq("id", data.conversationId).maybeSingle();
+    if (!visible) throw new Error("Conversa não encontrada ou sem permissão.");
     const { data: rows, error } = await supabaseAdmin
       .from("scheduled_messages" as any)
       .select("id, content, send_at, status, error, created_by")

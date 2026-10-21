@@ -76,6 +76,16 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
             const patch: any = { status: mapped };
             if (mapped === "connected") { patch.qr_code = null; patch.last_connected_at = new Date().toISOString(); }
             await supabaseAdmin.from("channels").update(patch).eq("id", channelId);
+            // Número conectou → dispara a descoberta automática de TODAS as
+            // conversas e o backfill do histórico (roda no servidor, via cron).
+            if (mapped === "connected") {
+              try {
+                const { startAutoHistory } = await import("@/lib/uazapi-discovery.server");
+                await startAutoHistory(supabaseAdmin, channelId);
+              } catch (e) {
+                console.error("[uazapi webhook] auto-history start err:", (e as Error).message);
+              }
+            }
           }
           return new Response("ok");
         }

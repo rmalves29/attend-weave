@@ -250,12 +250,19 @@ function HistorySyncCard({ channelId, connected, syncing, onSync }: any) {
   const total = data?.total ?? 0;
   const finished = data?.finished ?? 0;
   const pct = total ? Math.round((finished / total) * 100) : 0;
+  const discovering = data?.discoveryPhase === "pending" || data?.discoveryPhase === "running";
   return (
     <div className="mt-4 rounded-lg border border-border p-3 space-y-2">
       <div className="flex items-center justify-between text-sm font-medium">
         <span>Sincronização do histórico</span>
         <span className="text-xs text-muted-foreground">{finished}/{total} chats</span>
       </div>
+      {discovering && (
+        <div className="flex items-center gap-1.5 text-xs text-primary">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Importando conversas automaticamente…
+        </div>
+      )}
       <Progress value={pct} />
       <div className="text-xs text-muted-foreground">
         {(data?.imported ?? 0).toLocaleString("pt-BR")} mensagens antigas importadas

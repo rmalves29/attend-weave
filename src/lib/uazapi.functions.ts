@@ -202,6 +202,17 @@ export const getUazapiStatus = createServerFn({ method: "POST" })
       patch.identifier = res?.instance?.wid ?? res?.instance?.owner ?? channel.identifier;
     }
     await supabaseAdmin.from("channels").update(patch).eq("id", data.channelId);
+
+    // Reforço ao webhook: se conectou e a descoberta automática ainda não foi
+    // disparada para este número, dispara agora (importa todo o histórico).
+    if (mapped === "connected" && !(channel as any).history_discovery) {
+      try {
+        const { startAutoHistory } = await import("./uazapi-discovery.server");
+        await startAutoHistory(supabaseAdmin, data.channelId);
+      } catch (e) {
+        console.warn("[uazapi] auto-history start falhou:", (e as Error).message);
+      }
+    }
     return { status: mapped };
   });
 
@@ -842,12 +853,21 @@ export const getHistoryBackfillStatus = createServerFn({ method: "POST" })
     const { data: rows } = await rq;
     const imported = (rows ?? []).reduce((s: number, r: any) => s + (r.fetched_count ?? 0), 0);
     const lastError = (rows ?? []).find((r: any) => r.last_error)?.last_error ?? null;
+
+    // Fase da descoberta automática (disparada ao conectar o número).
+    let discoveryPhase: string | null = null;
+    if (data.channelId) {
+      const { data: ch } = await sb
+        .from("channels").select("history_discovery").eq("id", data.channelId).maybeSingle();
+      discoveryPhase = ((ch as any)?.history_discovery?.phase as string) ?? null;
+    }
     return {
       total: total.count ?? 0,
       finished: finished.count ?? 0,
       errored: errored.count ?? 0,
       imported,
       lastError,
+      discoveryPhase,
     };
   });
 

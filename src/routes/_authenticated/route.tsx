@@ -9,10 +9,31 @@ export const Route = createFileRoute("/_authenticated")({
   beforeLoad: async () => {
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) throw redirect({ to: "/auth" });
-    return { user: data.user };
+    // Só quem tem role (criado por um admin) acessa o painel.
+    const { data: roles } = await supabase
+      .from("user_roles").select("role").eq("user_id", data.user.id);
+    const hasAccess = (roles ?? []).length > 0;
+    return { user: data.user, hasAccess };
   },
   component: AuthenticatedLayout,
 });
+
+function NoAccess({ onLogout }: { onLogout: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-sm text-center space-y-4">
+        <h1 className="text-xl font-semibold">Acesso pendente</h1>
+        <p className="text-sm text-muted-foreground">
+          Sua conta ainda não foi liberada. Peça a um administrador do AttendFlow para
+          liberar seu acesso.
+        </p>
+        <Button variant="outline" onClick={onLogout}>
+          <LogOut className="w-4 h-4 mr-2" /> Sair
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 const navItems = [
   { to: "/atendimento", icon: MessageCircle, label: "Atendimento" },
@@ -23,13 +44,15 @@ const navItems = [
 ];
 
 function AuthenticatedLayout() {
-  const { user } = Route.useRouteContext();
+  const { user, hasAccess } = Route.useRouteContext();
   const router = useRouter();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.navigate({ to: "/auth" });
   };
+
+  if (!hasAccess) return <NoAccess onLogout={handleLogout} />;
 
   const initials = (user.user_metadata?.name || user.email || "?")
     .split(/\s+/).map((s: string) => s[0]).join("").slice(0, 2).toUpperCase();

@@ -56,8 +56,19 @@ export const Route = createFileRoute("/api/public/dispatch-scheduled-messages")(
           }
         }
 
+        // Carona no mesmo cron de minuto: dispara campanhas no ritmo (50/dia,
+        // 1 a cada X min, janela de horário). Isolado em try/catch pra nunca
+        // quebrar o envio das mensagens agendadas.
+        let campaigns: any = null;
+        try {
+          const { dispatchDueCampaigns } = await import("@/lib/campaigns.server");
+          campaigns = await dispatchDueCampaigns(supabaseAdmin, { maxPerRun: 5 });
+        } catch (e) {
+          console.error("[dispatch-scheduled] campanhas err:", (e as Error).message);
+        }
+
         return new Response(
-          JSON.stringify({ ok: true, sent, failed, checked: (due ?? []).length }),
+          JSON.stringify({ ok: true, sent, failed, checked: (due ?? []).length, campaigns }),
           {
             headers: { "Content-Type": "application/json" },
           },

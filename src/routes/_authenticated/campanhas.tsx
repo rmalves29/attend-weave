@@ -115,6 +115,31 @@ function NewCampaignDialog() {
   const [scheduledStartAt, setScheduledStartAt] = useState("");
   const [warmupEnabled, setWarmupEnabled] = useState(true);
   const [typingEnabled, setTypingEnabled] = useState(true);
+  const [media, setMedia] = useState<{ path: string; type: string; filename: string; mime: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 60 * 1024 * 1024) { toast.error("Arquivo maior que 60MB"); return; }
+    setUploading(true);
+    try {
+      const mime = f.type || "application/octet-stream";
+      const kind = mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video"
+        : mime.startsWith("audio/") ? "audio" : "document";
+      const ext = f.name.includes(".") ? f.name.split(".").pop() : "";
+      const path = `campaigns/${crypto.randomUUID()}${ext ? "." + ext : ""}`;
+      const { error } = await supabase.storage.from("attachments").upload(path, f, { contentType: mime, upsert: false });
+      if (error) throw error;
+      setMedia({ path, type: kind, filename: f.name, mime });
+      toast.success("Anexo carregado");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Falha ao enviar anexo");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
 
   const { data: channels = [] } = useQuery({
     queryKey: ["campaign-channels"],
@@ -135,6 +160,7 @@ function NewCampaignDialog() {
   const mutation = useMutation({
     mutationFn: () => createFn({ data: {
       name: name.trim(), channelId, message: message.trim(), recipientsRaw,
+      mediaPath: media?.path, mediaType: media?.type as any, mediaFilename: media?.filename, mediaMime: media?.mime,
       dailyCap, intervalMinutes, warmupEnabled, typingEnabled,
       scheduledStartAt: scheduledStartAt ? new Date(scheduledStartAt).toISOString() : null,
     } }),
@@ -142,7 +168,7 @@ function NewCampaignDialog() {
       toast.success(`Campanha criada: ${r.total} contatos${r.duplicates ? `, ${r.duplicates} duplicados removidos` : ""}${r.invalid ? `, ${r.invalid} inválidos` : ""}.${scheduledStartAt ? " Vai iniciar no horário agendado." : " Inicie na campanha."}`);
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       setOpen(false);
-      setName(""); setMessage(""); setRecipientsRaw(""); setChannelId(""); setScheduledStartAt("");
+      setName(""); setMessage(""); setRecipientsRaw(""); setChannelId(""); setScheduledStartAt(""); setMedia(null);
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha ao criar"),
   });
@@ -186,8 +212,20 @@ function NewCampaignDialog() {
             )}
           </div>
           <div>
-            <Label>Mensagem</Label>
+            <Label>Mensagem {media ? "(legenda do anexo)" : ""}</Label>
             <Textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={6} placeholder="Oi {nome}! Tudo bem?…" />
+          </div>
+          <div>
+            <Label>Anexo (opcional) — imagem, vídeo, áudio ou documento</Label>
+            {media ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
+                <span className="truncate">📎 {media.filename} <span className="text-muted-foreground">({media.type})</span></span>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setMedia(null)}>Remover</Button>
+              </div>
+            ) : (
+              <Input type="file" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx" disabled={uploading} onChange={handleFile} />
+            )}
+            {uploading && <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Enviando anexo…</p>}
           </div>
           <div>
             <Label>Lista de telefones <span className="text-muted-foreground font-normal">({lineCount} linhas)</span></Label>
@@ -226,7 +264,7 @@ function NewCampaignDialog() {
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
           <Button
-            disabled={!name.trim() || !channelId || !message.trim() || !recipientsRaw.trim() || mutation.isPending}
+            disabled={!name.trim() || !channelId || (!message.trim() && !media) || !recipientsRaw.trim() || uploading || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
@@ -324,8 +362,11 @@ function CampaignDetailDialog({ id, onClose }: { id: string | null; onClose: () 
               )}
 
               <div className="rounded-lg border border-border p-3 bg-muted/30">
-                <div className="text-xs text-muted-foreground mb-1">Mensagem</div>
-                <div className="text-sm whitespace-pre-wrap">{c.message_template}</div>
+                <div className="text-xs text-muted-foreground mb-1">Mensagem{c.media_path ? " + anexo" : ""}</div>
+                {c.media_path && (
+                  <div className="text-xs mb-1">📎 {c.media_filename ?? "arquivo"} <span className="text-muted-foreground">({c.media_type})</span></div>
+                )}
+                <div className="text-sm whitespace-pre-wrap">{c.message_template || <span className="text-muted-foreground italic">(sem legenda)</span>}</div>
               </div>
 
               {(data as any).recentFailed?.length > 0 && (

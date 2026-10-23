@@ -9,7 +9,7 @@
 //   • pausa automática após falhas seguidas (chip caído/banido)
 // Garante o ritmo mesmo se o cron atrasar (nunca dispara em rajada).
 import { ensureChatConversation } from "./uazapi-ingest.server";
-import { sendTextViaUazapi } from "./uazapi-send.server";
+import { sendTextViaUazapi, sendMediaViaUazapi } from "./uazapi-send.server";
 
 const TZ = "America/Sao_Paulo";
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -138,7 +138,7 @@ export async function dispatchDueCampaigns(sb: any, opts: { maxPerRun?: number }
 
   const { data: campaigns } = await sb
     .from("campaigns")
-    .select("id, channel_id, message_template, daily_cap, interval_minutes, window_start, window_end, last_sent_at, next_send_at, consecutive_failures, warmup_enabled, typing_enabled, started_at")
+    .select("id, channel_id, message_template, media_path, media_type, media_filename, media_mime, daily_cap, interval_minutes, window_start, window_end, last_sent_at, next_send_at, consecutive_failures, warmup_enabled, typing_enabled, started_at")
     .eq("status", "running")
     .limit(20);
 
@@ -181,9 +181,17 @@ export async function dispatchDueCampaigns(sb: any, opts: { maxPerRun?: number }
       const ensured = await ensureChatConversation(sb, c.channel_id, { wa_chatid: jid, wa_name: next.name ?? undefined });
       const convId = ensured?.conversationId;
       if (!convId) throw new Error("não foi possível criar a conversa");
-      const text = renderTemplate(c.message_template, next.name);
-      const delayMs = c.typing_enabled ? typingDelayMs(text) : undefined;
-      await sendTextViaUazapi(sb, { conversationId: convId, text, senderAgentId: null, delayMs });
+      const text = renderTemplate(c.message_template ?? "", next.name);
+      const delayMs = c.typing_enabled ? typingDelayMs(text || "x".repeat(20)) : undefined;
+      if (c.media_path) {
+        await sendMediaViaUazapi(sb, {
+          conversationId: convId, storagePath: c.media_path,
+          filename: c.media_filename ?? "arquivo", mimeType: c.media_mime ?? "application/octet-stream",
+          caption: text, senderAgentId: null, delayMs,
+        });
+      } else {
+        await sendTextViaUazapi(sb, { conversationId: convId, text, senderAgentId: null, delayMs });
+      }
 
       await sb.from("campaign_recipients").update({
         status: "sent", sent_at: now.toISOString(), conversation_id: convId, error: null,

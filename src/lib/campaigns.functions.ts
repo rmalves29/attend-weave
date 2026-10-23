@@ -17,8 +17,12 @@ export const createCampaign = createServerFn({ method: "POST" })
   .inputValidator(z.object({
     name: z.string().trim().min(1).max(120),
     channelId: z.string().uuid(),
-    message: z.string().trim().min(1).max(4000),
+    message: z.string().trim().max(4000).optional(),
     recipientsRaw: z.string().min(1),
+    mediaPath: z.string().min(1).max(500).optional(),
+    mediaType: z.enum(["image", "video", "audio", "document"]).optional(),
+    mediaFilename: z.string().max(260).optional(),
+    mediaMime: z.string().max(200).optional(),
     dailyCap: z.number().int().min(1).max(1000).optional(),
     intervalMinutes: z.number().int().min(1).max(240).optional(),
     windowStart: z.number().int().min(0).max(23).optional(),
@@ -31,6 +35,9 @@ export const createCampaign = createServerFn({ method: "POST" })
     const supabaseAdmin = await assertAgentOrAdmin(context.userId);
     const { parseRecipientList } = await import("./campaigns.server");
 
+    if (!data.message?.trim() && !data.mediaPath) {
+      throw new Error("Escreva uma mensagem ou anexe uma mídia.");
+    }
     const { phones, invalid, duplicates } = parseRecipientList(data.recipientsRaw);
     if (!phones.length) throw new Error("Nenhum telefone válido na lista.");
 
@@ -46,7 +53,11 @@ export const createCampaign = createServerFn({ method: "POST" })
     const { data: campaign, error } = await supabaseAdmin.from("campaigns" as any).insert({
       name: data.name,
       channel_id: data.channelId,
-      message_template: data.message,
+      message_template: data.message ?? "",
+      media_path: data.mediaPath ?? null,
+      media_type: data.mediaType ?? null,
+      media_filename: data.mediaFilename ?? null,
+      media_mime: data.mediaMime ?? null,
       status: scheduled ? "scheduled" : "draft",
       scheduled_start_at: scheduled ? data.scheduledStartAt : null,
       total: phones.length,
@@ -92,7 +103,7 @@ export const getCampaignDetail = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: campaign } = await sb
       .from("campaigns" as any)
-      .select("id, name, status, message_template, total, sent_count, failed_count, consecutive_failures, daily_cap, interval_minutes, window_start, window_end, warmup_enabled, typing_enabled, last_sent_at, next_send_at, scheduled_start_at, created_at, channel_id, channels(name, status)")
+      .select("id, name, status, message_template, media_path, media_type, media_filename, media_mime, total, sent_count, failed_count, consecutive_failures, daily_cap, interval_minutes, window_start, window_end, warmup_enabled, typing_enabled, last_sent_at, next_send_at, scheduled_start_at, created_at, channel_id, channels(name, status)")
       .eq("id", data.id).maybeSingle();
     if (!campaign) throw new Error("Campanha não encontrada");
     const [{ count: pending }, { data: recentFailed }] = await Promise.all([
@@ -134,7 +145,11 @@ export const updateCampaign = createServerFn({ method: "POST" })
   .inputValidator(z.object({
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(120).optional(),
-    message: z.string().trim().min(1).max(4000).optional(),
+    message: z.string().trim().max(4000).optional(),
+    mediaPath: z.string().max(500).nullish(),
+    mediaType: z.enum(["image", "video", "audio", "document"]).nullish(),
+    mediaFilename: z.string().max(260).nullish(),
+    mediaMime: z.string().max(200).nullish(),
     dailyCap: z.number().int().min(1).max(1000).optional(),
     intervalMinutes: z.number().int().min(1).max(240).optional(),
     windowStart: z.number().int().min(0).max(23).optional(),
@@ -155,6 +170,10 @@ export const updateCampaign = createServerFn({ method: "POST" })
     const patch: any = {};
     if (data.name !== undefined) patch.name = data.name;
     if (data.message !== undefined) patch.message_template = data.message;
+    if (data.mediaPath !== undefined) patch.media_path = data.mediaPath;
+    if (data.mediaType !== undefined) patch.media_type = data.mediaType;
+    if (data.mediaFilename !== undefined) patch.media_filename = data.mediaFilename;
+    if (data.mediaMime !== undefined) patch.media_mime = data.mediaMime;
     if (data.dailyCap !== undefined) patch.daily_cap = data.dailyCap;
     if (data.intervalMinutes !== undefined) patch.interval_minutes = data.intervalMinutes;
     if (data.windowStart !== undefined) patch.window_start = data.windowStart;

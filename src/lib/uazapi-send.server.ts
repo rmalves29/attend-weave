@@ -11,6 +11,10 @@ export async function sendTextViaUazapi(
     text: string;
     senderAgentId: string | null;
     replyToMessageId?: string;
+    // Humanização — usado SÓ pelo disparo em massa (campanhas). No atendimento
+    // normal vem undefined, então nada muda. `delayMs` faz a própria uazapi
+    // mostrar "digitando..." por esse tempo antes de soltar a mensagem.
+    delayMs?: number;
   },
 ) {
   const { data: conv, error: convErr } = await supabaseAdmin
@@ -27,10 +31,9 @@ export async function sendTextViaUazapi(
 
   const reply = await resolveReply(supabaseAdmin, params.replyToMessageId);
 
-  const res = await uazapiFetch("/send/text", {
-    token,
-    body: { number: phone, text: params.text, replyid: reply?.shortId },
-  });
+  const body: any = { number: phone, text: params.text, replyid: reply?.shortId };
+  if (params.delayMs && params.delayMs > 0) body.delay = Math.round(params.delayMs);
+  const res = await uazapiFetch("/send/text", { token, body });
   const rawExternalId: string | null =
     res?.messageid ?? res?.id ?? res?.key?.id ?? res?.message?.key?.id ?? null;
   // Normaliza pra bater com o que o webhook/sync vão gravar depois

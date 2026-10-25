@@ -230,11 +230,32 @@ function decryptWhatsAppMedia(bytes: Uint8Array, mediaKeyRaw: unknown, messageTy
   return new Uint8Array(Buffer.concat([decipher.update(payload), decipher.final()]));
 }
 
+// O token da instância só pode ir para o próprio servidor da uazapi. URLs de
+// mídia vêm do payload do webhook (externo) — mandar o token para qualquer
+// host permitiria capturá-lo.
+function isUazapiHost(url: string): boolean {
+  const base = process.env.UAZAPI_URL;
+  if (!base) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchRemoteBytes(url: string, token?: string) {
+  let protocol = "";
+  try { protocol = new URL(url).protocol; } catch { /* inválida */ }
+  if (protocol !== "https:" && protocol !== "http:") {
+    throw new Error("URL da mídia inválida");
+  }
+  const sendToken = token && isUazapiHost(url) ? token : undefined;
   const attempts: RequestInit[] = [
     {},
-    token ? { headers: { token } } : {},
-    token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+    // com token: não segue redirect (o header iria junto para outro host)
+    sendToken ? { headers: { token: sendToken }, redirect: "manual" } : {},
+    sendToken ? { headers: { Authorization: `Bearer ${sendToken}` }, redirect: "manual" } : {},
   ];
   let lastErr = "";
   for (const init of attempts) {

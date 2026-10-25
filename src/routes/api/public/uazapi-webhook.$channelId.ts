@@ -1,4 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createHash, timingSafeEqual } from "crypto";
+
+// Comparação em tempo constante (evita descobrir o token por tempo de resposta).
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb) && a.length === b.length;
+}
 
 export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
   server: {
@@ -23,7 +31,7 @@ export const Route = createFileRoute("/api/public/uazapi-webhook/$channelId")({
           payload?.token ??
           payload?.instance?.token ??
           payload?.data?.token;
-        if (!expectedToken || providedToken !== expectedToken) {
+        if (!expectedToken || !safeEqual(String(providedToken ?? ""), String(expectedToken))) {
           console.warn("[uazapi webhook] token inválido para canal", channelId);
           return new Response("unauthorized", { status: 401 });
         }

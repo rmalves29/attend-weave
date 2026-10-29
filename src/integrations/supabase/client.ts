@@ -19,7 +19,12 @@ function createSupabaseClient() {
     throw new Error(message);
   }
 
+  // Schema configurável por env (migração p/ venda_live1 usa `attendflow`;
+  // padrão `public` mantém o comportamento no Lovable).
+  const SUPABASE_SCHEMA = import.meta.env.VITE_SUPABASE_SCHEMA || process.env.SUPABASE_SCHEMA || 'public';
+
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    db: { schema: SUPABASE_SCHEMA as any },
     auth: {
       storage: brokeredPreviewStorage(),
       persistSession: true,

@@ -19,7 +19,10 @@ function createSupabaseAdminClient() {
     throw new Error(message);
   }
 
+  const SUPABASE_SCHEMA = process.env.SUPABASE_SCHEMA || 'public';
+
   return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    db: { schema: SUPABASE_SCHEMA as any },
     auth: {
       storage: undefined,
       persistSession: false,

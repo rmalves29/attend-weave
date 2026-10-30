@@ -17,10 +17,12 @@ export const Route = createFileRoute("/api/public/history-backfill")({
         // 1) Descoberta: enfileira todas as conversas de números recém-conectados.
         // Enquanto houver canal descobrindo, a tick é dedicada a isso (é rápido:
         // só lista e enfileira). Depois, cada tick faz o backfill do histórico.
+        // Cloudflare Workers cortam execuções longas, então cada tick faz um
+        // pedaço CURTO e salva o cursor — o cron (minuto) continua de onde parou.
         const { runDiscoveryStep } = await import("@/lib/uazapi-discovery.server");
         let disc = { stillDiscovering: false, didWork: false, enqueued: 0 };
         try {
-          disc = await runDiscoveryStep(supabaseAdmin, { deadline: Date.now() + 45_000 });
+          disc = await runDiscoveryStep(supabaseAdmin, { deadline: Date.now() + 8_000 });
         } catch (e) {
           console.error("[history-backfill] discovery err:", (e as Error).message);
         }
@@ -30,9 +32,11 @@ export const Route = createFileRoute("/api/public/history-backfill")({
         let result = { processed: 0, added: 0, remaining: 1 };
         if (!disc.didWork) {
           result = await runBackfillBatch(supabaseAdmin, {
-            deadline: Date.now() + 50_000,
-            concurrency: 3,
-            limit: 20,
+            deadline: Date.now() + 12_000,
+            concurrency: 2,
+            limit: 5,
+            pages: 3,
+            reserveMs: 2_000,
           });
         }
 
